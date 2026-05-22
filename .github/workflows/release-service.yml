@@ -159,23 +159,24 @@ jobs:
 
       - name: Stage + zip the service payload
         id: pkg
-        # Layout inside the .zip mirrors what ServiceSupervisor expects in
-        # ~/Library/Application Support/Keywordista/service/:
-        #   keywordista-server     (the signed Vapor binary, renamed)
-        #   Public/                (SPA assets)
+        # Layout inside the .zip is `service/keywordista-server` and
+        # `service/Public/…`. That `service/` wrapper matches the exact
+        # directory the menubar app's UpdateChecker drops into
+        # ~/Library/Application Support/Keywordista/, so applying an
+        # update is a single atomic move rather than a path rewrite.
         run: |
           set -euo pipefail
-          mkdir -p releases stage
-          cp "$SERVER_BIN" stage/keywordista-server
-          cp -R Public stage/Public
+          mkdir -p releases service
+          cp "$SERVER_BIN" service/keywordista-server
+          cp -R Public service/Public
 
           ZIP_NAME="keywordista-service-${{ steps.version.outputs.version }}.zip"
           ZIP_PATH="releases/$ZIP_NAME"
 
-          # `ditto` produces a .zip that preserves macOS metadata + symlinks
-          # exactly. notarytool requires this — a plain `zip` from BSD will
-          # work but ditto is the Apple-recommended path.
-          ditto -c -k --sequesterRsrc --keepParent stage "$ZIP_PATH"
+          # `ditto -c -k --keepParent service ...` produces a .zip whose
+          # top-level entry is `service/` — preserves macOS metadata +
+          # symlinks correctly, which BSD `zip` can mangle.
+          ditto -c -k --sequesterRsrc --keepParent service "$ZIP_PATH"
 
           echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"

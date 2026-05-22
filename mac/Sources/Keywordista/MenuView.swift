@@ -3,19 +3,27 @@ import SwiftUI
 
 // The dropdown shown when the user clicks the menubar icon.
 //
-// Items, top to bottom:
+// Always visible:
 //   • Status text + dot ("Running on :8080" etc.)
-//   • Open Dashboard — opens http://127.0.0.1:8080/ in the default browser
+//   • Open Dashboard
+//   • Check for service updates  → triggers UpdateChecker.checkNow()
 //   • Launch at login (toggle)
-//   • Quit Keywordista (sigterm child, NSApp.terminate)
+//   • Quit Keywordista
 //
-// MenuBarExtra renders its body as a real macOS menu (not a popover) when
-// menuBarExtraStyle is .menu (the default). That means we can't use
-// arbitrary SwiftUI views — only Buttons, Toggles, Dividers, and Text.
+// Conditionally surfaced based on UpdateChecker.status:
+//   • .available  → "● Update available (v0.2.0)" + "Apply Update"
+//   • .applying   → "● Updating to v0.2.0… (stage)"
+//   • .error      → "⚠ Update failed: <reason>" + "Retry"
+//
+// MenuBarExtra renders its body as a real macOS menu when style is .menu
+// (the default), so the vocabulary here is limited to Buttons, Toggles,
+// Dividers, and plain Text. No arbitrary SwiftUI — we work within those
+// primitives.
 struct MenuView: View {
     @EnvironmentObject var supervisor: ServiceSupervisor
     @EnvironmentObject var health: HealthMonitor
     @EnvironmentObject var loginItems: LoginItemManager
+    @EnvironmentObject var updates: UpdateChecker
 
     var body: some View {
         Text(statusLine)
@@ -28,6 +36,17 @@ struct MenuView: View {
             }
         }
         .disabled(!health.isHealthy)
+
+        // Update-flow section. Renders nothing in the .idle and .checking
+        // states so the menu stays quiet when there's nothing to do.
+        updateSection
+
+        Divider()
+
+        Button("Check for service updates") {
+            Task { await updates.checkNow() }
+        }
+        .disabled(isUpdateInProgress)
 
         Divider()
 
@@ -50,6 +69,38 @@ struct MenuView: View {
         .keyboardShortcut("q")
     }
 
+    // MARK: - Update flow rendering
+
+    @ViewBuilder
+    private var updateSection: some View {
+        switch updates.status {
+        case .idle, .checking:
+            EmptyView()
+
+        case .available(let version, _):
+            Divider()
+            Text("● Update available: v\(version)")
+            Button("Apply Update") {
+                Task { await updates.applyUpdate() }
+            }
+
+        case .applying(let version, let stage):
+            Divider()
+            Text("Updating to v\(version) — \(stage)…")
+                .foregroundStyle(.secondary)
+
+        case .error(let reason):
+            Divider()
+            Text("⚠ Update failed: \(reason)")
+                .foregroundStyle(.red)
+            Button("Retry") {
+                Task { await updates.checkNow() }
+            }
+        }
+    }
+
+    // MARK: - Status line
+
     private var statusLine: String {
         switch supervisor.status {
         case .stopped:
@@ -59,5 +110,10 @@ struct MenuView: View {
         case .crashed(let reason):
             return "● Crashed: \(reason)"
         }
+    }
+
+    private var isUpdateInProgress: Bool {
+        if case .applying = updates.status { return true }
+        return false
     }
 }

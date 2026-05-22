@@ -11,6 +11,7 @@ final class AppCoordinator: ObservableObject {
     let supervisor: ServiceSupervisor
     let health: HealthMonitor
     let loginItems: LoginItemManager
+    let updates: UpdateChecker
 
     init() {
         let supervisor = ServiceSupervisor()
@@ -22,9 +23,15 @@ final class AppCoordinator: ObservableObject {
         health.portSource = { [weak supervisor] in
             supervisor?.port ?? ServiceSupervisor.preferredPort
         }
+
+        let updates = UpdateChecker()
+        updates.bind(to: supervisor)
+        updates.start()  // kicks off the 6h poll cadence
+
         self.supervisor = supervisor
         self.health = health
         self.loginItems = LoginItemManager()
+        self.updates = updates
     }
 }
 
@@ -49,14 +56,26 @@ struct KeywordistaApp: App {
                 .environmentObject(coord.supervisor)
                 .environmentObject(coord.health)
                 .environmentObject(coord.loginItems)
+                .environmentObject(coord.updates)
         } label: {
             // SF Symbol template image — automatically follows the menubar
-            // appearance (light/dark/accent). Two variants:
-            //   default → magnifyingglass (Keywordista's "K-as-ASO-tool" idea)
-            //   update available → same glyph with a circle.fill badge
-            // We don't have an UpdateChecker plumbed in this scaffold; the
-            // label just shows the default icon for now.
-            Image(systemName: "magnifyingglass")
+            // appearance (light/dark/accent). Switches to a badged variant
+            // when there's an update worth showing, so the user can see
+            // "something needs attention" without opening the menu.
+            Image(systemName: iconName(for: coord.updates.status))
+        }
+    }
+
+    /// Menubar icon name. Default state is a plain magnifying glass;
+    /// anything worth surfacing (available update, error, in-flight apply)
+    /// uses the `.circle.fill` variant which reads as a subtle badge in
+    /// either light or dark menubars.
+    private func iconName(for status: UpdateStatus) -> String {
+        switch status {
+        case .available, .applying, .error:
+            return "magnifyingglass.circle.fill"
+        case .idle, .checking:
+            return "magnifyingglass"
         }
     }
 }
