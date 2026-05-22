@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Mono-ish numerics so rank columns line up. */
+:root {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* Subtle scrollbar that reads on dark backgrounds. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: rgb(24 24 27); /* zinc-900 */
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(63 63 70); /* zinc-700 */
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(82 82 91); /* zinc-600 */
+}

@@ -1,0 +1,6 @@
+.build/
+Keywordista.app/
+BundledService/
+.swiftpm/
+*.xcodeproj/
+DerivedData/

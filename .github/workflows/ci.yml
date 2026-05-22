@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Lets us trigger CI manually from the Actions tab — handy when poking
+  # at a workflow change without pushing extra commits.
+  workflow_dispatch:
+
+# Cancel in-progress runs on the same ref when a new push arrives. Keeps the
+# Actions tab tidy and saves a few CI-minutes for a project that ships small
+# personal-tool patches.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Vapor server (swift build + test)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # macos-14 ships with Swift 5.10 in the system toolchain — no extra
+      # setup-action needed. Verify the version so a future runner change
+      # doesn't silently downgrade us.
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Cache SwiftPM build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/.cache/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-server-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-server-
+
+      - name: swift build
+        run: swift build
+
+      - name: swift test
+        run: swift test
+
+  spa:
+    name: Svelte SPA (type-check + build)
+    # SPA build is platform-agnostic; Ubuntu is faster and cheaper than macOS
+    # runners for plain npm work.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          # npm ci reads the lockfile — caching the npm store makes the
+          # 100-ish-package install instant on cache hits.
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Type-check (svelte-check)
+        run: npm run check
+
+      - name: Build production bundle
+        run: npm run build
+
+  mac-app:
+    name: Menubar app (swift build)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Cache SwiftPM build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            mac/.build
+            ~/.cache/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-mac-${{ hashFiles('mac/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-mac-
+
+      - name: swift build
+        # Builds the SwiftUI MenuBarExtra binary. Bundling into Keywordista.app
+        # via build-app.sh is intentionally a release-time concern; CI just
+        # proves the Swift compiles + links.
+        run: swift build

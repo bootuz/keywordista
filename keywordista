@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Single-command launcher for keywordista.
+#
+#   ./keywordista                  — run from the repo
+#   ln -sf "$PWD/keywordista" /usr/local/bin/keywordista
+#   keywordista                    — run from anywhere
+#
+# Builds the Svelte SPA into Public/ if needed, then `exec`s the Vapor server.
+# The dashboard becomes available at http://127.0.0.1:8080.
+
+set -euo pipefail
+
+# Resolve symlinks so the script can run from /usr/local/bin while still
+# finding the repo files relative to its real location.
+SCRIPT="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT" ]; do
+  TARGET="$(readlink "$SCRIPT")"
+  case "$TARGET" in
+    /*) SCRIPT="$TARGET" ;;
+    *)  SCRIPT="$(cd "$(dirname "$SCRIPT")" && pwd)/$TARGET" ;;
+  esac
+done
+REPO="$(cd "$(dirname "$SCRIPT")" && pwd)"
+cd "$REPO"
+
+# Default token if the user hasn't exported one. Personal tool, localhost only,
+# so a dev fallback keeps the launcher zero-config without surprising anyone
+# who actually set the env var.
+: "${KEYWORDISTA_API_TOKEN:=devtoken}"
+export KEYWORDISTA_API_TOKEN
+
+# First-run: install web deps if they're missing.
+if [ ! -d web/node_modules ]; then
+  echo "→ installing web deps (first run)…"
+  (cd web && npm install)
+fi
+
+# Build the SPA. Vite emits to ../Public which Vapor's FileMiddleware serves.
+# This is fast on subsequent builds (Vite caches aggressively).
+echo "→ building web bundle…"
+(cd web && npm run build --silent)
+
+echo "→ starting Vapor on http://127.0.0.1:8080  (token: $KEYWORDISTA_API_TOKEN)"
+echo
+# `exec` so Ctrl+C goes straight to Vapor — no orphan processes on Ctrl+C.
+exec swift run
