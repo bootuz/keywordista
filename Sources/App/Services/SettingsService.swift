@@ -18,18 +18,37 @@ struct ASACredentials: Sendable, Equatable {
 // Storage-level status descriptors. These are what the API returns to the
 // settings UI — they tell you which fields are set without ever echoing the
 // secret material back to the browser.
+//
+// `configured` is a STORED property even though it's derived: Swift's
+// synthesized Codable encoder only emits stored properties, so making it
+// computed would silently drop the field on the wire (the SPA's "Not
+// connected" indicator depends on it).
 struct ASCStatus: Codable, Sendable, Equatable {
     let keyId: String?
     let issuerId: String?
     let hasPrivateKey: Bool
-    var configured: Bool { keyId != nil && issuerId != nil && hasPrivateKey }
+    let configured: Bool
+
+    init(keyId: String?, issuerId: String?, hasPrivateKey: Bool) {
+        self.keyId = keyId
+        self.issuerId = issuerId
+        self.hasPrivateKey = hasPrivateKey
+        self.configured = keyId != nil && issuerId != nil && hasPrivateKey
+    }
 }
 
 struct ASAStatus: Codable, Sendable, Equatable {
     let clientId: String?
     let orgId: String?
     let hasClientSecret: Bool
-    var configured: Bool { clientId != nil && hasClientSecret }
+    let configured: Bool
+
+    init(clientId: String?, orgId: String?, hasClientSecret: Bool) {
+        self.clientId = clientId
+        self.orgId = orgId
+        self.hasClientSecret = hasClientSecret
+        self.configured = clientId != nil && hasClientSecret
+    }
 }
 
 protocol SettingsServiceProtocol: Sendable {
