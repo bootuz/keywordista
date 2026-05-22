@@ -8,6 +8,7 @@
     refreshBatch,
     markRefreshing,
     ensurePolling,
+    refreshDeveloperKeywords,
   } from '../lib/stores';
   import {
     groupedSections,
@@ -90,6 +91,11 @@
 
   onMount(async () => {
     await load();
+    // Pull the latest ASC keyword list in the background — localStorage gives
+    // us instant-paint badges from the last session; this refresh keeps them
+    // current if the user shipped a new version since the page was last open.
+    // Failure is non-fatal: dashboard rows render fine without the badge.
+    void refreshDeveloperKeywords().catch(() => {});
     // If a Refresh All was in flight when the page was unloaded, the queue
     // is still chewing through it. The persisted batch tells us which IDs
     // were in this run; for each, check whether the row's checkedAt has

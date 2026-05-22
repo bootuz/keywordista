@@ -6,6 +6,10 @@ struct SettingsController: RouteCollection {
         settings.get("asc", use: getASC)
         settings.put("asc", use: putASC)
         settings.delete("asc", use: deleteASC)
+        // Live-fetches the developer's per-locale keyword list from ASC using
+        // the stored credentials. Returns {} when no creds are configured so
+        // the SPA can call this unconditionally on every load.
+        settings.get("asc", "keywords", use: getASCKeywords)
         settings.get("asa", use: getASA)
         settings.put("asa", use: putASA)
         settings.delete("asa", use: deleteASA)
@@ -58,6 +62,20 @@ struct SettingsController: RouteCollection {
     @Sendable func deleteASC(req: Request) async throws -> HTTPStatus {
         try await req.settingsService().clearASCCredentials()
         return .noContent
+    }
+
+    // Response shape mirrors the SPA's `developerKeywords` store:
+    //   { "<watchedAppUUID>": { "us": [...], "jp": [...] } }
+    // Empty map (`{}`) is a valid, non-error response when ASC isn't
+    // configured or the user has no watched apps yet.
+    @Sendable func getASCKeywords(req: Request) async throws -> [String: [String: [String]]] {
+        do {
+            return try await req.developerKeywordsService().fetchAll()
+        } catch let failure as AppStoreConnectClient.Failure {
+            // Surface ASC-side errors as 502 so the SPA can render the
+            // message in the Settings panel rather than swallowing it.
+            throw Abort(.badGateway, reason: failure.description)
+        }
     }
 
     // ── ASA ───────────────────────────────────────────────────────────────

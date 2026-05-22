@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
-import type { DashboardRow, WatchedApp } from './types';
-import { getDashboard, getRefreshStatus } from './api';
+import type { DashboardRow, WatchedApp, DeveloperKeywordsResponse } from './types';
+import { getDashboard, getRefreshStatus, getDeveloperKeywords } from './api';
 
 // Shared UI state. Each store has a single owner (the component that calls
 // the matching `set` after an API call); other components subscribe read-only.
@@ -168,9 +168,10 @@ function reconcile(rows: DashboardRow[], queuePending: number): void {
 
 // ── Developer keywords (ASC) ────────────────────────────────────────────
 //
-// Indexed appId → countryCode → set of normalized terms. Phase 4b will
-// populate this via the ASC API and persist into the same localStorage key,
-// so the seam is consistent across UI reloads and API loads.
+// Indexed appId → countryCode → set of normalized terms. Populated from
+// GET /api/v1/settings/asc/keywords (live ASC fetch) and mirrored into
+// localStorage so the badges paint instantly on the next reload while the
+// fresh fetch is in flight.
 // Shape on disk:
 //   { "<appUUID>": { "us": ["flashcards", "anki"], "jp": ["暗記カード"] } }
 const DEV_KW_STORAGE_KEY = 'keywordista_developer_keywords';
@@ -224,4 +225,40 @@ export function isInDeveloperKeywords(
   term: string,
 ): boolean {
   return table.get(appId)?.get(countryCode.toLowerCase())?.has(normalizeTerm(term)) ?? false;
+}
+
+// Tracks the wall-clock of the most recent successful refresh so the Settings
+// panel can show "Last refreshed: 2 minutes ago". `null` means we've never
+// completed one in this session (a hydrate from localStorage doesn't count —
+// that data could be hours old and we don't know when it landed).
+export const developerKeywordsLastFetchedAt = writable<Date | null>(null);
+export const developerKeywordsError = writable<string | null>(null);
+
+function toMap(response: DeveloperKeywordsResponse): Map<string, Map<string, Set<string>>> {
+  const out = new Map<string, Map<string, Set<string>>>();
+  for (const [appId, byCountry] of Object.entries(response)) {
+    const inner = new Map<string, Set<string>>();
+    for (const [cc, terms] of Object.entries(byCountry)) {
+      inner.set(cc.toLowerCase(), new Set(terms.map((t) => t.toLowerCase())));
+    }
+    out.set(appId, inner);
+  }
+  return out;
+}
+
+// Fetches the developer-keywords map from the server and replaces the in-memory
+// store (which in turn persists to localStorage via the subscribe above). Safe
+// to call unconditionally — the backend returns `{}` when ASC isn't wired up.
+export async function refreshDeveloperKeywords(): Promise<void> {
+  try {
+    const response = await getDeveloperKeywords();
+    developerKeywords.set(toMap(response));
+    developerKeywordsLastFetchedAt.set(new Date());
+    developerKeywordsError.set(null);
+  } catch (err) {
+    developerKeywordsError.set(err instanceof Error ? err.message : String(err));
+    // Don't clobber any cached map on failure — better to keep showing the
+    // last-known badges than to drop them while the user is mid-investigation.
+    throw err;
+  }
 }

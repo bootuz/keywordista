@@ -36,6 +36,19 @@ extension Request {
         SettingsService(repository: FluentSettingsRepository(db: db))
     }
 
+    func developerKeywordsService() -> any DeveloperKeywordsServiceProtocol {
+        let theClient = client
+        let theLogger = logger
+        return DeveloperKeywordsService(
+            settings: settingsService(),
+            watchedApps: FluentWatchedAppRepository(db: db),
+            makeClient: { creds in
+                AppStoreConnectClient(credentials: creds, client: theClient, logger: theLogger)
+            },
+            logger: logger
+        )
+    }
+
     func queueStatusService() -> any QueueStatusServiceProtocol {
         QueueStatusService(db: db)
     }

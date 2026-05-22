@@ -12,6 +12,10 @@ let package = Package(
         .package(url: "https://github.com/vapor/fluent-sqlite-driver.git", from: "4.7.0"),
         .package(url: "https://github.com/vapor/queues.git", from: "1.15.0"),
         .package(url: "https://github.com/m-barthelemy/vapor-queues-fluent-driver.git", from: "2.0.0"),
+        // ES256 JWT signing for App Store Connect API calls. swift-crypto is
+        // already pinned transitively via Vapor; declaring it here just
+        // exposes the `Crypto` product to the App target.
+        .package(url: "https://github.com/apple/swift-crypto.git", "4.0.0"..<"5.0.0"),
     ],
     targets: [
         .executableTarget(
@@ -22,6 +26,7 @@ let package = Package(
                 .product(name: "FluentSQLiteDriver", package: "fluent-sqlite-driver"),
                 .product(name: "Queues", package: "queues"),
                 .product(name: "QueuesFluentDriver", package: "vapor-queues-fluent-driver"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ],
             path: "Sources/App",
             swiftSettings: [

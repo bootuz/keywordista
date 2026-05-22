@@ -8,6 +8,7 @@ import type {
   QueueStatus,
   ASCStatus,
   ASAStatus,
+  DeveloperKeywordsResponse,
 } from './types';
 
 const BASE = '/api/v1';
@@ -89,6 +90,11 @@ export const getASCSettings = () => apiFetch<ASCStatus>('/settings/asc');
 export const putASCSettings = (body: { keyId: string; issuerId: string; privateKey?: string }) =>
   apiFetch<ASCStatus>('/settings/asc', { method: 'PUT', body: JSON.stringify(body) });
 export const deleteASCSettings = () => apiFetch<void>('/settings/asc', { method: 'DELETE' });
+
+// Live-fetches the developer's per-locale keyword list from App Store Connect
+// using the stored credentials. Returns {} when ASC isn't configured.
+export const getDeveloperKeywords = () =>
+  apiFetch<DeveloperKeywordsResponse>('/settings/asc/keywords');
 
 export const getASASettings = () => apiFetch<ASAStatus>('/settings/asa');
 export const putASASettings = (body: { clientId: string; clientSecret?: string; orgId?: string }) =>

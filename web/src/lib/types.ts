@@ -82,3 +82,8 @@ export interface RefreshResponse {
 export interface QueueStatus {
   pending: number;
 }
+
+// Map of watchedAppId → countryCode → list of normalized keyword terms that
+// appear in the developer's App Store Connect keywords field for the latest
+// version localization mapped to that storefront.
+export type DeveloperKeywordsResponse = Record<string, Record<string, string[]>>;

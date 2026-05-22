@@ -9,11 +9,43 @@
     deleteASASettings,
   } from '../lib/api';
   import type { ASCStatus, ASAStatus } from '../lib/types';
+  import {
+    developerKeywords,
+    developerKeywordsLastFetchedAt,
+    developerKeywordsError,
+    refreshDeveloperKeywords,
+  } from '../lib/stores';
+  import { apps } from '../lib/stores';
+  import { timeAgo } from '../lib/time';
 
   interface Props {
     onClose: () => void;
   }
   let { onClose }: Props = $props();
+
+  // ── Developer keywords (ASC fetch results) ─────────────────────────────
+  let devKwBusy = $state(false);
+  const devKwSummary = $derived.by(() => {
+    const map = $developerKeywords;
+    const list = $apps;
+    return list.map((a) => {
+      const byCountry = map.get(a.id);
+      const storefronts = byCountry?.size ?? 0;
+      let total = 0;
+      if (byCountry) for (const set of byCountry.values()) total += set.size;
+      return { name: a.name, total, storefronts };
+    });
+  });
+  async function refreshDevKeywords() {
+    devKwBusy = true;
+    try {
+      await refreshDeveloperKeywords();
+    } catch {
+      // Error message is captured in developerKeywordsError — surface inline.
+    } finally {
+      devKwBusy = false;
+    }
+  }
 
   // ── ASC state ─────────────────────────────────────────────────────────
   let ascStatus = $state<ASCStatus | null>(null);
@@ -80,6 +112,10 @@
       ascPrivateKey = '';
       ascReplacing = false;
       ascMessage = 'Saved.';
+      // Immediately pull the keyword list from ASC — this is the whole point
+      // of saving credentials; the dashboard badges should light up without
+      // requiring a manual refresh or page reload.
+      void refreshDevKeywords();
     } catch (err) {
       ascError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -98,6 +134,9 @@
       ascIssuerId = '';
       ascPrivateKey = '';
       ascMessage = 'Disconnected.';
+      // Backend will return {} now — that's still the right thing to push
+      // into the store so the badges disappear.
+      void refreshDevKeywords();
     } catch (err) {
       ascError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -249,6 +288,54 @@
           {/if}
         </div>
       </form>
+
+      <!-- Developer keywords summary — proof the integration works ─────── -->
+      {#if ascStatus?.configured}
+        <div class="mt-4 rounded-md border border-zinc-800 bg-zinc-900/40 p-3">
+          <div class="flex items-baseline justify-between">
+            <h4 class="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              Your App Store keywords
+            </h4>
+            <button
+              type="button"
+              onclick={refreshDevKeywords}
+              disabled={devKwBusy}
+              class="text-xs text-amber-400 hover:underline disabled:opacity-50"
+            >
+              {devKwBusy ? 'Fetching…' : 'Refresh now'}
+            </button>
+          </div>
+
+          {#if $developerKeywordsError}
+            <p class="mt-2 text-xs text-red-400">{$developerKeywordsError}</p>
+          {/if}
+
+          {#if devKwSummary.length === 0}
+            <p class="mt-2 text-xs text-zinc-500">Add an app to start tracking keywords.</p>
+          {:else}
+            <ul class="mt-2 space-y-1 text-xs">
+              {#each devKwSummary as row}
+                <li class="flex items-baseline justify-between text-zinc-300">
+                  <span class="truncate">{row.name}</span>
+                  <span class="font-mono text-zinc-500">
+                    {row.total} keywords / {row.storefronts} storefronts
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+
+          {#if $developerKeywordsLastFetchedAt}
+            <p class="mt-2 text-xs text-zinc-500">
+              Last refreshed {timeAgo($developerKeywordsLastFetchedAt.toISOString())}.
+            </p>
+          {:else}
+            <p class="mt-2 text-xs text-zinc-500">
+              Click "Refresh now" to pull the latest keyword list from App Store Connect.
+            </p>
+          {/if}
+        </div>
+      {/if}
     </section>
 
     <!-- ASA ─────────────────────────────────────────────────────────────── -->
