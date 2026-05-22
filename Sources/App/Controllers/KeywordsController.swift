@@ -7,6 +7,11 @@ struct KeywordsController: RouteCollection {
         kw.post(use: create)
         kw.delete(":id", use: delete)
         kw.post(":id", "refresh", use: refresh)
+        // Mines Apple Search Ads search-term reports for terms related to
+        // this seed keyword. Returns [] when ASA isn't configured or the
+        // user has no campaigns serving the seed's storefront — that's the
+        // common case until a discovery campaign accumulates data.
+        kw.get(":id", "suggestions", use: suggestions)
 
         routes.post("refresh-all", use: refreshAll)
         routes.get("refresh-status", use: refreshStatus)
@@ -61,5 +66,15 @@ struct KeywordsController: RouteCollection {
 
     @Sendable func refreshStatus(req: Request) async throws -> QueueStatus {
         try await req.queueStatusService().status()
+    }
+
+    @Sendable func suggestions(req: Request) async throws -> [SuggestionRow] {
+        guard let id = req.parameters.get("id", as: UUID.self) else { throw Abort(.badRequest) }
+        do {
+            return try await req.keywordSuggestionService().suggest(seedKeywordId: id)
+        } catch let failure as AppleSearchAdsClient.Failure {
+            // Surface Apple's reason text so the panel can render it.
+            throw Abort(.badGateway, reason: failure.description)
+        }
     }
 }

@@ -87,3 +87,16 @@ export interface QueueStatus {
 // appear in the developer's App Store Connect keywords field for the latest
 // version localization mapped to that storefront.
 export type DeveloperKeywordsResponse = Record<string, Record<string, string[]>>;
+
+// A single row in the HistoryPanel "Related" tab — mined from the user's
+// Apple Search Ads search-term reports for campaigns in the same country
+// as the seed keyword.
+export interface SuggestionRow {
+  term: string;
+  source: string;          // "AUTO" (Search Match) | "TARGETED" | "UNKNOWN"
+  impressions: number;
+  taps: number;
+  ttr: number;             // 0…1
+  alreadyTracked: boolean;
+  currentRank: number | null;
+}

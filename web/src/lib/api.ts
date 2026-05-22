@@ -9,6 +9,7 @@ import type {
   ASCStatus,
   ASAStatus,
   DeveloperKeywordsResponse,
+  SuggestionRow,
 } from './types';
 
 const BASE = '/api/v1';
@@ -95,6 +96,12 @@ export const deleteASCSettings = () => apiFetch<void>('/settings/asc', { method:
 // using the stored credentials. Returns {} when ASC isn't configured.
 export const getDeveloperKeywords = () =>
   apiFetch<DeveloperKeywordsResponse>('/settings/asc/keywords');
+
+// Mines Apple Search Ads search-term reports for terms related to this
+// tracked keyword. Returns [] when ASA isn't configured, no campaigns serve
+// the seed's storefront, or the campaign hasn't accumulated data yet.
+export const getKeywordSuggestions = (id: string) =>
+  apiFetch<SuggestionRow[]>(`/keywords/${id}/suggestions`);
 
 export const getASASettings = () => apiFetch<ASAStatus>('/settings/asa');
 export const putASASettings = (body: { clientId: string; clientSecret?: string; orgId?: string }) =>

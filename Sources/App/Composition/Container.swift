@@ -49,6 +49,27 @@ extension Request {
         )
     }
 
+    func keywordSuggestionService() -> any KeywordSuggestionServiceProtocol {
+        let theHTTP: any ASAHTTPClient = VaporASAHTTPClient(client: client)
+        let theLogger = logger
+        let cache = application.asaTokenCache
+        return KeywordSuggestionService(
+            settings: settingsService(),
+            keywordRepo: FluentKeywordRepository(db: db),
+            rankCheckRepo: FluentRankCheckRepository(db: db),
+            makeClient: { creds in
+                AppleSearchAdsClient(
+                    credentials: creds,
+                    tokenCache: cache,
+                    http: theHTTP,
+                    logger: theLogger
+                )
+            },
+            now: { Date() },
+            logger: logger
+        )
+    }
+
     func queueStatusService() -> any QueueStatusServiceProtocol {
         QueueStatusService(db: db)
     }
@@ -64,6 +85,21 @@ extension Request {
 }
 
 extension Application {
+    /// Process-wide cache for ASA OAuth access tokens. Lazily created on
+    /// first use and held in `Application.storage` so all request-scoped
+    /// ASA clients share the same cache and don't burn one OAuth exchange
+    /// per request.
+    var asaTokenCache: ASATokenCache {
+        if let existing = storage[ASATokenCacheKey.self] { return existing }
+        let new = ASATokenCache()
+        storage[ASATokenCacheKey.self] = new
+        return new
+    }
+
+    private struct ASATokenCacheKey: StorageKey {
+        typealias Value = ASATokenCache
+    }
+
     // Factories used by Queues jobs, where we only have a `QueueContext`.
     var refreshServiceFactory: @Sendable (QueueContext) -> any RefreshServiceProtocol {
         { context in

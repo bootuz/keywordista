@@ -300,6 +300,7 @@
       watchedAppId={historyTarget.watchedAppId}
       watchedAppName={historyTarget.watchedAppName}
       onClose={() => (historyTarget = null)}
+      onAdded={load}
     />
   {/if}
   {#if showSettings}
