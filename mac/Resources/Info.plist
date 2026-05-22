@@ -8,6 +8,11 @@
     <string>Keywordista</string>
     <key>CFBundleExecutable</key>
     <string>Keywordista</string>
+    <!-- AppIcon.icns is generated from AppIcon.png at build time; see
+         mac/generate-icon.sh. The .icns extension is implied — don't
+         include it in this string. -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.bootuz.keywordista</string>
     <key>CFBundleInfoDictionaryVersion</key>

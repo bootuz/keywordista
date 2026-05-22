@@ -88,25 +88,70 @@ warn() { printf "⚠ %s\n" "$1" >&2; }
 
 # ── 1. Universal release builds ───────────────────────────────────────────
 
-step "building universal Vapor server (release, arm64+x86_64)…"
-# -Osize instead of the default -O works around a Swift 6.2.1 compiler
-# crash in FluentKit's EnumBuilder.generateDatatype() during the
-# CopyPropagation SIL pass. The runtime cost for our workload (~1 iTunes
-# call/sec, SQLite writes) is unmeasurable; the DMG is also a few MB
-# smaller as a bonus. Flip back to -O when Apple ships the SIL fix.
+# Two design choices baked into the build commands below:
+#
+#  1. **Per-arch builds + lipo, not `swift build --arch arm64 --arch x86_64`.**
+#     SwiftPM's universal-build mode shells out to Xcode's xcbuild engine,
+#     which trips on some Vapor transitive deps (swift-collections,
+#     swift-service-lifecycle) under Xcode 16.x with cryptic errors like
+#     "Some of the Swift language versions used in target settings are
+#     supported. (given: [5], supported: [])". Building each arch
+#     separately uses SwiftPM's native build system, which doesn't have
+#     this issue. `lipo -create` then merges the two single-arch binaries
+#     into one universal binary — same end result, more robust path.
+#
+#  2. **-Osize for the server** works around a Swift 6.2.1 SIL optimizer
+#     crash in FluentKit's EnumBuilder.generateDatatype() during the
+#     CopyPropagation pass. Runtime cost is unmeasurable for our workload
+#     (~1 iTunes call/sec, SQLite writes); the binary is also a few MB
+#     smaller. Flip back to -O when Apple ships the SIL fix.
 SERVER_SWIFTC_FLAGS=("-Xswiftc" "-Osize")
-(cd "$REPO_ROOT" && swift build -c release --product App --arch arm64 --arch x86_64 "${SERVER_SWIFTC_FLAGS[@]}")
-SERVER_BIN_DIR=$(cd "$REPO_ROOT" && swift build -c release --product App --arch arm64 --arch x86_64 --show-bin-path)
-SERVER_BIN="$SERVER_BIN_DIR/App"
-echo "  server binary: $SERVER_BIN"
-lipo -archs "$SERVER_BIN"  # quick sanity-print: "arm64 x86_64"
 
-step "building universal menubar app (release, arm64+x86_64)…"
-(cd "$MAC_DIR" && swift build -c release --arch arm64 --arch x86_64)
-APP_BIN_DIR=$(cd "$MAC_DIR" && swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
-APP_BIN="$APP_BIN_DIR/$APP_NAME"
-echo "  app binary: $APP_BIN"
-lipo -archs "$APP_BIN"
+build_universal_binary() {
+    local label="$1"     # human-readable name for logs
+    local build_dir="$2" # directory containing Package.swift to build in
+    local product="$3"   # SwiftPM product/target name (also the binary file name)
+    local output="$4"    # final universal-binary path
+    shift 4
+    local extra_flags=("$@")
+
+    step "building $label (release, arm64)…"
+    # bash 3.2 (macOS's default) errors on "${empty_array[@]}" under set -u.
+    # The ${arr[@]+"${arr[@]}"} idiom expands to nothing when unset/empty
+    # and to the properly-quoted elements when populated.
+    (cd "$build_dir" && swift build -c release --product "$product" --arch arm64 ${extra_flags[@]+"${extra_flags[@]}"})
+    local arm64_bin
+    arm64_bin="$(cd "$build_dir" && swift build -c release --product "$product" --arch arm64 --show-bin-path)/$product"
+
+    step "building $label (release, x86_64)…"
+    (cd "$build_dir" && swift build -c release --product "$product" --arch x86_64 ${extra_flags[@]+"${extra_flags[@]}"})
+    local x86_64_bin
+    x86_64_bin="$(cd "$build_dir" && swift build -c release --product "$product" --arch x86_64 --show-bin-path)/$product"
+
+    step "lipo-merging $label into universal binary…"
+    lipo -create "$arm64_bin" "$x86_64_bin" -output "$output"
+    lipo -archs "$output"
+}
+
+# Universal Vapor server → temp output path so we don't clobber single-arch
+# .build/ outputs that subsequent invocations rely on.
+SERVER_BIN="$REPO_ROOT/.build/keywordista-server-universal"
+build_universal_binary \
+    "Vapor server" \
+    "$REPO_ROOT" \
+    "App" \
+    "$SERVER_BIN" \
+    "${SERVER_SWIFTC_FLAGS[@]}"
+
+# Universal menubar app. The menubar target doesn't pull in FluentKit so
+# it doesn't strictly need -Osize, but keeping the build pattern uniform
+# makes the script easier to reason about and trims a few KB anyway.
+APP_BIN="$MAC_DIR/.build/$APP_NAME-universal"
+build_universal_binary \
+    "menubar app" \
+    "$MAC_DIR" \
+    "$APP_NAME" \
+    "$APP_BIN"
 
 step "building SPA…"
 (cd "$REPO_ROOT/web" && npm run build --silent)
@@ -125,6 +170,15 @@ cp "$MAC_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/"
 # Classic 8-byte BNDL hint — modern macOS doesn't strictly need it but
 # silences the occasional "damaged" warning on older systems.
 printf "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
+
+# App icon. Regenerated from mac/Resources/AppIcon.png on every release
+# build so a designer can swap the source PNG without touching anything
+# else. Skipped if the source isn't there yet (Finder shows the generic
+# .app icon as a fallback).
+if [ -f "$MAC_DIR/Resources/AppIcon.png" ]; then
+    "$MAC_DIR/generate-icon.sh"
+    cp "$MAC_DIR/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+fi
 
 # ── 3. Code-sign the .app (inside-out) ────────────────────────────────────
 

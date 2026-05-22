@@ -126,13 +126,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-service-release-
 
-      - name: Build universal Vapor binary
-        # -Osize works around a Swift 6.2.1 SIL crash in FluentKit's
-        # EnumBuilder. See mac/build-dmg.sh for the same workaround.
+      - name: Build per-arch + lipo into universal Vapor binary
+        # See mac/build-dmg.sh for the full rationale. Short version:
+        #   • Per-arch builds (not `--arch arm64 --arch x86_64`) because
+        #     SwiftPM's universal mode invokes xcbuild, which trips on
+        #     swift-collections / swift-service-lifecycle under Xcode 16.x.
+        #     Each single-arch build uses the native SwiftPM build system
+        #     and works fine; `lipo -create` merges them after.
+        #   • -Osize avoids a Swift 6.2.1 SIL crash in FluentKit.
         run: |
-          swift build -c release --product App --arch arm64 --arch x86_64 -Xswiftc -Osize
-          BIN_DIR=$(swift build -c release --product App --arch arm64 --arch x86_64 --show-bin-path)
-          echo "SERVER_BIN=$BIN_DIR/App" >> "$GITHUB_ENV"
+          set -euo pipefail
+          swift build -c release --product App --arch arm64 -Xswiftc -Osize
+          ARM64_BIN="$(swift build -c release --product App --arch arm64 --show-bin-path)/App"
+
+          swift build -c release --product App --arch x86_64 -Xswiftc -Osize
+          X86_BIN="$(swift build -c release --product App --arch x86_64 --show-bin-path)/App"
+
+          SERVER_BIN=".build/keywordista-server-universal"
+          lipo -create "$ARM64_BIN" "$X86_BIN" -output "$SERVER_BIN"
+          echo "SERVER_BIN=$PWD/$SERVER_BIN" >> "$GITHUB_ENV"
 
       - name: Verify universal binary
         run: |

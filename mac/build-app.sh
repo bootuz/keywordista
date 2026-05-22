@@ -33,6 +33,15 @@ cp "Resources/Info.plist" "$APP_BUNDLE/Contents/"
 # "damaged" warning on older systems.
 printf "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
+# App icon. Skipped silently if the source PNG isn't checked in yet —
+# Finder will just show the generic .app icon in that case. Once
+# mac/Resources/AppIcon.png exists, the build always regenerates the
+# .icns so an updated source PNG flows through without a manual step.
+if [ -f "Resources/AppIcon.png" ]; then
+    ./generate-icon.sh
+    cp "Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+fi
+
 echo "→ building service binary ($CONFIG)…"
 (cd "$REPO_ROOT" && swift build -c "$CONFIG")
 cp "$REPO_ROOT/.build/$CONFIG/App" "$APP_BUNDLE/Contents/Resources/keywordista-server"
