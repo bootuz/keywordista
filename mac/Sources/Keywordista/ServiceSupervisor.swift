@@ -89,7 +89,14 @@ final class ServiceSupervisor: ObservableObject {
         process.standardError = openAppending(logsDir.appendingPathComponent("service.stderr.log"))
 
         process.terminationHandler = { [weak self] proc in
-            Task { @MainActor in
+            // The inner Task is a Sendable closure crossing actor boundaries;
+            // recapture self weakly here so the compiler can see the capture
+            // is safe (just an Optional<ServiceSupervisor>, not a live
+            // reference). Without this, older Swift toolchains (Xcode 15.4
+            // on macos-14) reject the implicit recapture from the outer
+            // [weak self] closure as "reference to captured var 'self' in
+            // concurrently-executing code".
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 // Distinguish a clean stop (we called terminate()) from a crash.
                 if self.process === proc {

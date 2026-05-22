@@ -19,7 +19,11 @@ concurrency:
 jobs:
   server:
     name: Vapor server (swift build + test)
-    runs-on: macos-14
+    # macos-15 ships Xcode 16+ (with Swift Testing bundled and Swift 6
+    # concurrency rules that match the local dev setup). macos-14's default
+    # Xcode 15.4 doesn't have the `Testing` module and rejects some of our
+    # weak-self captures.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -75,7 +79,11 @@ jobs:
 
   mac-app:
     name: Menubar app (swift build)
-    runs-on: macos-14
+    # macos-15 ships Xcode 16+ (with Swift Testing bundled and Swift 6
+    # concurrency rules that match the local dev setup). macos-14's default
+    # Xcode 15.4 doesn't have the `Testing` module and rejects some of our
+    # weak-self captures.
+    runs-on: macos-15
     defaults:
       run:
         working-directory: mac
