@@ -1,4 +1,4 @@
-.PHONY: dev-backend dev-web build-web build run install-web check-web clean-web mac-app open-mac-app help
+.PHONY: dev-backend dev-web build-web build run install-web check-web clean-web mac-app open-mac-app dmg dmg-unsigned help
 
 .DEFAULT_GOAL := run
 
@@ -16,6 +16,8 @@ help:
 	@echo "  make run           — single-command launch: build web + swift run"
 	@echo "  make mac-app       — build Keywordista.app (server + SPA + menubar shell)"
 	@echo "  make open-mac-app  — mac-app + open the resulting .app"
+	@echo "  make dmg           — build a signed + notarized DMG (releases/)"
+	@echo "  make dmg-unsigned  — build an unsigned DMG (skips signing + notarizing)"
 
 dev-backend:
 	KEYWORDISTA_API_TOKEN=$(KEYWORDISTA_API_TOKEN) swift run
@@ -48,3 +50,16 @@ mac-app:
 
 open-mac-app: mac-app
 	open mac/Keywordista.app
+
+# Build a release DMG: universal binaries, Developer ID signed, notarized,
+# stapled. Requires (a) a Developer ID Application cert in the keychain
+# and (b) a one-time notarytool credential profile named "keywordista".
+# See mac/build-dmg.sh for the full env-var contract.
+dmg:
+	cd mac && ./build-dmg.sh
+
+# Same release build, but skips signing + notarization — useful when you
+# want to verify the universal-binary assembly without burning a notarize
+# round-trip.
+dmg-unsigned:
+	cd mac && KEYWORDISTA_SKIP_SIGN=1 ./build-dmg.sh

@@ -1,0 +1,200 @@
+name: Release App
+
+# Cuts a signed + notarized Keywordista.app DMG and publishes it to GitHub
+# Releases when an app-v* tag is pushed. Reuses mac/build-dmg.sh — the same
+# script developers run locally — so CI and local builds are byte-identical
+# except for the version stamp injected from the tag.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   MACOS_CERT_P12_BASE64        — Developer ID Application cert exported
+#                                   as .p12, then base64 encoded:
+#                                     base64 -i cert.p12 | pbcopy
+#   MACOS_CERT_PASSWORD          — password set during the .p12 export
+#   APPLE_ID                     — Apple ID email tied to the developer team
+#   APPLE_APP_SPECIFIC_PASSWORD  — app-specific password from
+#                                   https://appleid.apple.com/account/manage
+#   APPLE_TEAM_ID                — KHNA6PF8QV (10-char team identifier)
+
+on:
+  push:
+    tags:
+      - 'app-v*'
+  # Manual trigger for dry runs without cutting a real release. Uploads the
+  # DMG as a workflow artifact instead of creating a Release.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to stamp into the build (e.g. 0.1.0)'
+        required: true
+        default: '0.1.0'
+
+# Don't ever cancel an in-flight release — half-uploaded artifacts are worse
+# than a queued one. Concurrent releases of different tags is fine; we only
+# serialize within the same group.
+concurrency:
+  group: release-app
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#app-v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::Could not determine version from $GITHUB_REF" && exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building Keywordista $VERSION"
+
+      - name: Inject version into Info.plist
+        # Done BEFORE signing — the .plist is part of what codesign seals.
+        # Mutating it post-sign would invalidate the signature.
+        run: |
+          plutil -replace CFBundleShortVersionString \
+            -string "${{ steps.version.outputs.version }}" \
+            mac/Resources/Info.plist
+          plutil -p mac/Resources/Info.plist | grep -E "CFBundle(ShortVersion|Identifier|Name)"
+
+      - name: Import Developer ID Application cert
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          # Ephemeral keychain — runner is destroyed after the job, so the
+          # cert never persists past this run. Random password lives only
+          # in this step's process memory.
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # -lut 21600 = unlocked for 6h; covers the longest plausible
+          # notarization round-trip.
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # Decode the cert, import it, immediately wipe the on-disk .p12.
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+
+          # Without set-key-partition-list, codesign would prompt for
+          # keychain access on first use (impossible in CI) and fail.
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          # Sanity check — the build will need this exact identity.
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep "Developer ID Application" \
+            || { echo "::error::Developer ID Application identity not found after import"; exit 1; }
+
+      - name: Store notarytool credentials
+        # build-dmg.sh calls `xcrun notarytool submit --keychain-profile keywordista`.
+        # This step writes the credentials into that named profile (stored
+        # in the default keychain, which is the ephemeral one from above).
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool store-credentials keywordista \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_PASSWORD"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install SPA deps
+        run: cd web && npm ci
+
+      - name: Cache SwiftPM build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            mac/.build
+            ~/.cache/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-release-${{ hashFiles('Package.resolved', 'Package.swift', 'mac/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-release-
+
+      - name: Build signed + notarized DMG
+        run: ./mac/build-dmg.sh
+
+      - name: Compute artifact metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          DMG="$(ls releases/*.dmg | head -n 1)"
+          SHA256="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+          # SHA-256 sidecar file — lets anyone verify the download
+          # independently of GitHub's UI.
+          echo "$SHA256  $(basename "$DMG")" > "$DMG.sha256"
+          {
+            echo "dmg=$DMG"
+            echo "sha256=$SHA256"
+          } >> "$GITHUB_OUTPUT"
+          echo "DMG: $DMG"
+          echo "SHA256: $SHA256"
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            "${{ steps.meta.outputs.dmg }}" \
+            "${{ steps.meta.outputs.dmg }}.sha256" \
+            --title "Keywordista ${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            --notes "$(cat <<EOF
+          Signed + notarized DMG for macOS 13+ (Apple Silicon + Intel universal).
+
+          \`\`\`
+          SHA-256: ${{ steps.meta.outputs.sha256 }}
+          \`\`\`
+
+          Verify the download:
+          \`\`\`
+          shasum -a 256 -c Keywordista-${{ steps.version.outputs.version }}.dmg.sha256
+          \`\`\`
+          EOF
+          )"
+
+      - name: Upload as workflow artifact (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: keywordista-${{ steps.version.outputs.version }}-dmg
+          path: |
+            releases/*.dmg
+            releases/*.dmg.sha256
+          retention-days: 14

@@ -96,6 +96,37 @@ make open-mac-app      # build + open the .app
 swift test             # run server tests
 ```
 
+### Building a release DMG
+
+The `mac/build-dmg.sh` script produces a signed + notarized DMG suitable for sharing on GitHub Releases. It does the full release flow: universal binaries (arm64 + x86_64) for both the menubar app and the server, Developer ID Application signing with hardened runtime + timestamp, DMG packaging, Apple notarization, and ticket stapling. Output lands in `releases/Keywordista-$VERSION.dmg`.
+
+**One-time setup** (only needed for full signing + notarization):
+
+```bash
+# Store notarytool credentials in your keychain. You'll need an
+# app-specific password from https://appleid.apple.com/account/manage
+xcrun notarytool store-credentials keywordista \
+  --apple-id    <your-apple-id> \
+  --team-id     KHNA6PF8QV \
+  --password    <app-specific-password>
+```
+
+**Build commands:**
+
+```bash
+make dmg              # full release: sign + notarize + staple
+make dmg-unsigned     # skip signing entirely (faster, for testing)
+
+# Or per-stage opt-out via env vars:
+KEYWORDISTA_SKIP_NOTARIZE=1 make dmg    # sign but don't notarize
+```
+
+Contributors without a Developer ID cert can use `make dmg-unsigned` to verify the build flow. The resulting DMG installs but Gatekeeper will show "unidentified developer" on first launch.
+
+#### Automated releases via GitHub Actions
+
+Tagging `app-v0.1.0` and pushing the tag triggers `.github/workflows/release-app.yml`, which runs the same `build-dmg.sh` on a `macos-15` runner with all signing + notarization secrets injected. See [`.github/RELEASING.md`](.github/RELEASING.md) for the one-time secret-configuration ritual.
+
 ### Project layout
 
 | Path | What lives there |
