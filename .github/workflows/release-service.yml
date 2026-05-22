@@ -1,0 +1,244 @@
+name: Release Service
+
+# Cuts a signed + notarized service .zip (Vapor binary + Public/) and
+# publishes it to GitHub Releases when a service-v* tag is pushed. The
+# menubar app's UpdateChecker (5d) polls the GitHub Releases API for
+# `service-v*` tags, downloads the .zip, verifies the contained binary's
+# signature with `codesign --verify`, and atomically swaps it into
+# ~/Library/Application Support/Keywordista/service/.
+#
+# Notarization binds to the binary's signature — not to the .zip wrapper —
+# so we don't (and can't) staple a ticket onto the .zip. Apple's online
+# Gatekeeper DB accepts the extracted binary when it's launched.
+#
+# Uses the same five repository secrets as release-app.yml; see
+# .github/RELEASING.md for setup.
+
+on:
+  push:
+    tags:
+      - 'service-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to stamp into Version.swift (e.g. 0.1.0)'
+        required: true
+        default: '0.1.0'
+
+concurrency:
+  group: release-service
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#service-v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::Could not determine version from $GITHUB_REF" && exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building service $VERSION"
+
+      - name: Stamp version into Version.swift
+        # CI is the source of truth for the published version — devs never
+        # have to remember to hand-edit Version.swift before tagging.
+        # `enum Version { static let current = "0.0.0" }` is the placeholder
+        # the file ships with.
+        run: |
+          sed -i '' \
+            's|static let current = ".*"|static let current = "${{ steps.version.outputs.version }}"|' \
+            Sources/App/Services/Version.swift
+          grep -F 'static let current' Sources/App/Services/Version.swift
+
+      - name: Import Developer ID Application cert
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep "Developer ID Application" \
+            || { echo "::error::Developer ID Application identity missing"; exit 1; }
+
+      - name: Store notarytool credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool store-credentials keywordista \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_PASSWORD"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install SPA deps
+        run: cd web && npm ci
+
+      - name: Cache SwiftPM build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/.cache/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-service-release-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-service-release-
+
+      - name: Build universal Vapor binary
+        # -Osize works around a Swift 6.2.1 SIL crash in FluentKit's
+        # EnumBuilder. See mac/build-dmg.sh for the same workaround.
+        run: |
+          swift build -c release --product App --arch arm64 --arch x86_64 -Xswiftc -Osize
+          BIN_DIR=$(swift build -c release --product App --arch arm64 --arch x86_64 --show-bin-path)
+          echo "SERVER_BIN=$BIN_DIR/App" >> "$GITHUB_ENV"
+
+      - name: Verify universal binary
+        run: |
+          lipo -archs "$SERVER_BIN" | tee /tmp/archs.txt
+          grep -q "arm64" /tmp/archs.txt
+          grep -q "x86_64" /tmp/archs.txt
+
+      - name: Build SPA
+        run: cd web && npm run build
+
+      - name: Sign Vapor binary
+        run: |
+          set -euo pipefail
+          CODESIGN_IDENTITY=$(
+            security find-identity -v -p codesigning |
+            grep "Developer ID Application:" |
+            head -n 1 |
+            sed -E 's/.*"(.+)".*/\1/'
+          )
+          codesign --force --options runtime --timestamp \
+            --sign "$CODESIGN_IDENTITY" \
+            "$SERVER_BIN"
+          codesign --verify --strict --verbose=2 "$SERVER_BIN"
+
+      - name: Stage + zip the service payload
+        id: pkg
+        # Layout inside the .zip mirrors what ServiceSupervisor expects in
+        # ~/Library/Application Support/Keywordista/service/:
+        #   keywordista-server     (the signed Vapor binary, renamed)
+        #   Public/                (SPA assets)
+        run: |
+          set -euo pipefail
+          mkdir -p releases stage
+          cp "$SERVER_BIN" stage/keywordista-server
+          cp -R Public stage/Public
+
+          ZIP_NAME="keywordista-service-${{ steps.version.outputs.version }}.zip"
+          ZIP_PATH="releases/$ZIP_NAME"
+
+          # `ditto` produces a .zip that preserves macOS metadata + symlinks
+          # exactly. notarytool requires this — a plain `zip` from BSD will
+          # work but ditto is the Apple-recommended path.
+          ditto -c -k --sequesterRsrc --keepParent stage "$ZIP_PATH"
+
+          echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          ls -lh "$ZIP_PATH"
+
+      - name: Notarize the binary (via .zip submission)
+        # Apple notarizes the SIGNATURE on the binary, not the .zip wrapper.
+        # No staple step here — stapling .zip is unsupported; the
+        # menubar app's UpdateChecker does codesign --verify on the
+        # extracted binary, which is sufficient given the binary is
+        # already notarization-approved in Apple's DB.
+        run: |
+          xcrun notarytool submit "${{ steps.pkg.outputs.zip }}" \
+            --keychain-profile keywordista \
+            --wait
+
+      - name: Compute artifact metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          SHA256="$(shasum -a 256 "${{ steps.pkg.outputs.zip }}" | awk '{print $1}')"
+          echo "$SHA256  ${{ steps.pkg.outputs.zip_name }}" > "${{ steps.pkg.outputs.zip }}.sha256"
+          {
+            echo "sha256=$SHA256"
+          } >> "$GITHUB_OUTPUT"
+          echo "SHA256: $SHA256"
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            "${{ steps.pkg.outputs.zip }}" \
+            "${{ steps.pkg.outputs.zip }}.sha256" \
+            --title "Service ${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            --notes "$(cat <<EOF
+          Notarized service payload for the Keywordista menubar app's in-app updater.
+
+          Layout (when extracted):
+
+          \`\`\`
+          keywordista-server     # signed universal Vapor binary
+          Public/                # SPA assets
+          \`\`\`
+
+          \`\`\`
+          SHA-256: ${{ steps.meta.outputs.sha256 }}
+          \`\`\`
+
+          End users don't need to download this directly — the Keywordista menubar app polls for these releases and applies them in-place. This is the artifact behind the **Apply Update** menu item.
+          EOF
+          )"
+
+      - name: Upload as workflow artifact (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: keywordista-service-${{ steps.version.outputs.version }}
+          path: |
+            releases/*.zip
+            releases/*.zip.sha256
+          retention-days: 14

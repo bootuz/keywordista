@@ -6,10 +6,10 @@ There are two release streams that ship independently:
 
 | Tag pattern | What gets built | Workflow |
 |---|---|---|
-| `app-v0.1.0` | `Keywordista.dmg` (the menubar app + bundled service) | `.github/workflows/release-app.yml` |
-| `service-v0.1.0` | `keywordista-service.zip` (the Vapor server + SPA) — consumed by the menubar app's in-app updater | _coming in 5e_ |
+| `app-v0.1.0` | `Keywordista-0.1.0.dmg` (the menubar app + bundled service) | [`release-app.yml`](workflows/release-app.yml) |
+| `service-v0.1.0` | `keywordista-service-0.1.0.zip` (the Vapor server + SPA) — consumed by the menubar app's in-app updater | [`release-service.yml`](workflows/release-service.yml) |
 
-This document covers the **app release** flow.
+Both workflows use the same five secrets — set them once and both pipelines work.
 
 ## One-time setup
 
@@ -45,7 +45,7 @@ Repo Settings → Secrets and variables → Actions → New repository secret. S
 | `APPLE_APP_SPECIFIC_PASSWORD` | The app-specific password from step 2 |
 | `APPLE_TEAM_ID` | `KHNA6PF8QV` |
 
-## Releasing
+## Releasing the app
 
 Once secrets are in place, releasing is a single tag push:
 
@@ -65,6 +65,36 @@ The workflow:
 7. Creates a GitHub Release with the DMG + a SHA-256 sidecar file, auto-generates release notes from commits since the previous tag
 
 Takes ~5–8 minutes end to end.
+
+## Releasing the service
+
+Service releases are the same idea but for the Vapor binary + SPA that the menubar app's in-app updater consumes:
+
+```bash
+git tag service-v0.1.0
+git push origin service-v0.1.0
+```
+
+The workflow:
+1. Stamps the version into `Sources/App/Services/Version.swift`
+2. Imports the cert (same dance as the app workflow)
+3. Builds the universal Vapor binary, signs it
+4. Builds the SPA
+5. `ditto`-zips `keywordista-server` + `Public/` into `keywordista-service-$VERSION.zip`
+6. Submits the .zip to Apple notarization — the **binary's signature** gets notarized; the .zip wrapper is just for transport. No stapling (unsupported on .zip), but the menubar app's `UpdateChecker` does `codesign --verify` after extraction, which is sufficient.
+7. Creates a GitHub Release with the .zip + SHA-256 sidecar.
+
+End users don't download these directly — the menubar app polls for `service-v*` releases and applies them in-place via the **Apply Update** menu item.
+
+### When to cut which release
+
+| Change | Tag |
+|---|---|
+| Backend logic (Vapor server, SPA, scoring heuristic, refresh job) | `service-vN.N.N` |
+| Menubar app UI / supervisor / update flow itself | `app-vN.N.N` |
+| First-time install needs the bundled fallback updated too | `app-vN.N.N` (re-bundles the latest service) |
+
+The app's bundled fallback service binary is whatever was on `main` at the time the app DMG was built. After install, the menubar app upgrades to whatever `service-v*` is newer than its bundled fallback. So users always get the latest service eventually, even if they only ever download the .dmg once.
 
 ## Dry-run testing
 
