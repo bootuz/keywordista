@@ -3,8 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    # Skip the whole pipeline when a commit only touches non-functional
+    # files. GitHub's rule is "skip iff every changed file matches one of
+    # these patterns" — touching any source file still triggers a full run.
+    # Add to this list as new doc-shaped files appear (CHANGELOG, etc.).
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
   # Lets us trigger CI manually from the Actions tab — handy when poking
   # at a workflow change without pushing extra commits.
   workflow_dispatch:
