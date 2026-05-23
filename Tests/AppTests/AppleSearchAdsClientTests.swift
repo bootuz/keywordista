@@ -44,6 +44,35 @@ struct AppleSearchAdsClientTests {
         #expect(calls.count == 2)
     }
 
+    @Test("OAuth request encodes all params on the URL query with an empty body")
+    func tokenCache_oauthRequestShape() async throws {
+        let creds = ASACredentials(
+            clientId: "SEARCHADS.abc-123",
+            clientSecret: "eyJ.jwt.value",
+            orgId: "999"
+        )
+        let cache = ASATokenCache()
+        let http = ScriptableHTTPClient(scripts: [
+            .oauth(accessToken: "tok", expiresIn: 3600),
+        ])
+
+        _ = try await cache.token(credentials: creds, http: http, logger: Logger(label: "t"))
+
+        let recorded = await http.recordedCalls()
+        #expect(recorded.count == 1)
+        let oauth = recorded[0]
+        #expect(oauth.method == .POST)
+        #expect(oauth.url.hasPrefix("https://appleid.apple.com/auth/oauth2/token?"))
+        #expect(oauth.url.contains("grant_type=client_credentials"))
+        // `percent(_:)` keeps RFC 3986 unreserved chars (`-._~`) literal.
+        #expect(oauth.url.contains("client_id=SEARCHADS.abc-123"))
+        #expect(oauth.url.contains("client_secret=eyJ.jwt.value"))
+        #expect(oauth.url.contains("scope=searchadsorg"))
+        // X-AP-Context belongs only on data calls, not on the OAuth exchange.
+        #expect(oauth.headers.first(name: "X-AP-Context") == nil)
+        #expect(oauth.headers.first(name: "Content-Type") == "application/x-www-form-urlencoded")
+    }
+
     @Test("TokenCache surfaces OAuth failure as Failure.oauthFailed")
     func tokenCache_oauthFailureSurfaces() async throws {
         let creds = ASACredentials(clientId: "C", clientSecret: "bad", orgId: nil)
