@@ -29,3 +29,7 @@ releases/
 *.dmg
 *.pkg
 *.tar.gz
+
+# Editor / agent scratch dirs
+.claude/
+.superpowers/
