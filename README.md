@@ -8,6 +8,8 @@ Self-hosted App Store keyword tracker for indie iOS developers.
 
 Tracks where your apps rank for a set of keywords across any of Apple's 175 App Store storefronts, snapshots the top results, and remembers everything — so you can see real ASO trends instead of guessing from this-week-only screenshots. A daily chart-position watchdog fires a browser notification the moment one of your apps enters, moves in, or exits a top-free category chart anywhere it's published. Runs entirely on your Mac: a Vapor service stores history in SQLite, a Svelte dashboard renders it, and a menu-bar app supervises the whole thing. You own the data and the schedule — no $50/mo subscription, no abandoned web app, no spreadsheet that goes stale within a week.
 
+![Keywordista dashboard — keyword ranks across multiple App Store storefronts with top-results snapshots, difficulty, and entry-barrier scoring](docs/dashboard.png)
+
 ---
 
 ## Install
