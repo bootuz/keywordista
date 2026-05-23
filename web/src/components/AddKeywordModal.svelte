@@ -1,6 +1,7 @@
 <script lang="ts">
   import { addKeyword } from '../lib/api';
-  import { dashboard } from '../lib/stores';
+  import { APP_STORE_COUNTRIES, isAppStoreCountry, appStoreCountryName } from '../lib/countries';
+  import CountryMultiCombobox from './CountryMultiCombobox.svelte';
 
   interface Props {
     onClose: () => void;
@@ -8,16 +9,29 @@
   }
   let { onClose, onAdded }: Props = $props();
 
+  const STORAGE_KEY = 'keywordista:lastCountries';
+
+  // Restore the user's last committed country selection so they don't have to
+  // re-pick every time. Falls back to ['us'] for first-time users or if
+  // storage is unavailable / corrupted.
+  function loadLastCountries(): string[] {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return ['us'];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return ['us'];
+      const valid = parsed.filter((x): x is string => typeof x === 'string' && isAppStoreCountry(x));
+      return valid.length ? valid : ['us'];
+    } catch {
+      return ['us'];
+    }
+  }
+
   let term = $state('');
-  let country = $state('us');
+  let countries = $state<string[]>(loadLastCountries());
   let busy = $state(false);
   let error = $state<string | null>(null);
-
-  // Suggest countries you're already tracking keywords in — saves typing
-  // on the common case. New countries are allowed; this is just autocomplete.
-  const suggestions = $derived(() =>
-    Array.from(new Set($dashboard.map((r) => r.countryCode))).sort(),
-  );
+  let progress = $state<{ done: number; total: number } | null>(null);
 
   async function submit(e: Event) {
     e.preventDefault();
@@ -25,20 +39,46 @@
       error = 'Term cannot be empty.';
       return;
     }
-    if (country.length !== 2) {
-      error = 'Country must be a 2-letter ISO code.';
+    if (countries.length === 0) {
+      error = 'Pick at least one country.';
       return;
     }
     busy = true;
     error = null;
-    try {
-      await addKeyword(term.trim(), country.trim().toLowerCase());
+    progress = { done: 0, total: countries.length };
+
+    const results = await Promise.allSettled(
+      countries.map(async (cc) => {
+        await addKeyword(term.trim(), cc);
+        progress = { done: (progress?.done ?? 0) + 1, total: countries.length };
+      }),
+    );
+
+    busy = false;
+    progress = null;
+
+    const failures = results
+      .map((r, i) => ({ cc: countries[i], r }))
+      .filter((x): x is { cc: string; r: PromiseRejectedResult } => x.r.status === 'rejected');
+
+    const succeeded = results.length - failures.length;
+
+    if (succeeded > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(countries));
+      } catch { /* storage may be disabled — non-fatal */ }
       onAdded();
+    }
+
+    if (failures.length === 0) {
       onClose();
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      busy = false;
+    } else {
+      error = failures
+        .map(({ cc, r }) => {
+          const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          return `${appStoreCountryName(cc)} (${cc.toUpperCase()}): ${msg}`;
+        })
+        .join(' • ');
     }
   }
 </script>
@@ -75,22 +115,25 @@
       />
     </label>
 
-    <label class="block space-y-1">
-      <span class="text-xs uppercase tracking-wide text-zinc-500">Country</span>
-      <input
-        type="text"
-        maxlength="2"
-        list="known-countries"
-        placeholder="us"
-        bind:value={country}
-        class="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm uppercase text-zinc-100 focus:border-zinc-500 focus:outline-none"
+    <div class="space-y-1">
+      <div class="flex items-baseline justify-between">
+        <span class="text-xs uppercase tracking-wide text-zinc-500">Countries</span>
+        {#if countries.length > 0}
+          <button
+            type="button"
+            onclick={() => (countries = [])}
+            class="text-xs text-zinc-500 hover:text-zinc-200"
+          >
+            Clear
+          </button>
+        {/if}
+      </div>
+      <CountryMultiCombobox
+        options={APP_STORE_COUNTRIES}
+        selected={countries}
+        onChange={(next) => (countries = next)}
       />
-      <datalist id="known-countries">
-        {#each suggestions() as cc}
-          <option value={cc}></option>
-        {/each}
-      </datalist>
-    </label>
+    </div>
 
     {#if error}
       <p class="text-sm text-red-400">{error}</p>
@@ -101,7 +144,13 @@
       disabled={busy}
       class="w-full rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 hover:bg-white disabled:opacity-50"
     >
-      {busy ? 'Adding…' : 'Add keyword'}
+      {#if busy && progress}
+        Adding {progress.done}/{progress.total}…
+      {:else if busy}
+        Adding…
+      {:else}
+        Add in {countries.length} {countries.length === 1 ? 'country' : 'countries'}
+      {/if}
     </button>
   </form>
   </div>

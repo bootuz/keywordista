@@ -2,12 +2,10 @@
 
 .DEFAULT_GOAL := run
 
-KEYWORDISTA_API_TOKEN ?= devtoken
-
 help:
 	@echo "Keywordista dev targets:"
 	@echo "  make               — single-command launch (alias for ./keywordista)"
-	@echo "  make dev-backend   — run Vapor on :8080 with devtoken"
+	@echo "  make dev-backend   — run Vapor on :8080"
 	@echo "  make dev-web       — run Vite dev server on :5173 (proxies /api → :8080)"
 	@echo "  make build-web     — build SPA to Public/ for production serving"
 	@echo "  make install-web   — npm install in web/"
@@ -20,7 +18,7 @@ help:
 	@echo "  make dmg-unsigned  — build an unsigned DMG (skips signing + notarizing)"
 
 dev-backend:
-	KEYWORDISTA_API_TOKEN=$(KEYWORDISTA_API_TOKEN) swift run
+	swift run
 
 dev-web:
 	cd web && npm run dev
