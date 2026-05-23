@@ -24,7 +24,8 @@ struct AppService: AppServiceProtocol {
             appStoreId: info.trackId,
             bundleId: info.bundleId,
             name: info.trackName,
-            iconURL: info.artworkUrl100
+            iconURL: info.artworkUrl100,
+            primaryGenreId: info.primaryGenreId
         )
         try await repository.save(app)
         return app

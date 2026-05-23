@@ -74,6 +74,23 @@ extension Request {
         QueueStatusService(db: db)
     }
 
+    func chartTrackerService() -> any ChartTrackerServiceProtocol {
+        ChartTrackerService(
+            db: db,
+            chartsClient: ITunesChartsClient(client: client, logger: logger),
+            lookupClient: ITunesLookupClient(client: client),
+            logger: logger
+        )
+    }
+
+    func availabilityProber() -> any AvailabilityProberProtocol {
+        AvailabilityProber(
+            db: db,
+            lookupClient: ITunesLookupClient(client: client),
+            logger: logger
+        )
+    }
+
     func versionService() -> any VersionServiceProtocol {
         VersionService(
             client: client,
@@ -123,6 +140,18 @@ extension Application {
             return KeywordService(
                 repository: FluentKeywordRepository(db: app.db),
                 dispatcher: QueueRefreshDispatcher(queue: context.queue)
+            )
+        }
+    }
+
+    var chartTrackerServiceFactory: @Sendable (QueueContext) -> any ChartTrackerServiceProtocol {
+        { context in
+            let app = context.application
+            return ChartTrackerService(
+                db: app.db,
+                chartsClient: ITunesChartsClient(client: app.client, logger: context.logger),
+                lookupClient: ITunesLookupClient(client: app.client),
+                logger: context.logger
             )
         }
     }
