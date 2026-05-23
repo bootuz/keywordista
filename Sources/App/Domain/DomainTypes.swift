@@ -15,6 +15,10 @@ struct LookupResultApp: Codable, Sendable, Equatable {
     let bundleId: String
     let trackName: String
     let artworkUrl100: String?
+    // Apple's "Primary Category" id (e.g. 6017 = Education). Used by the
+    // chart-tracking watchdog to pick the right RSS feed per app. Optional
+    // because not every iTunes lookup variant returns it consistently.
+    let primaryGenreId: Int?
 }
 
 struct DashboardRow: Codable, Sendable, Equatable {

@@ -10,6 +10,8 @@ import type {
   ASAStatus,
   DeveloperKeywordsResponse,
   SuggestionRow,
+  ChartPosition,
+  ChartEvent,
 } from './types';
 
 const BASE = '/api/v1';
@@ -107,6 +109,25 @@ export const getASASettings = () => apiFetch<ASAStatus>('/settings/asa');
 export const putASASettings = (body: { clientId: string; clientSecret?: string; orgId?: string }) =>
   apiFetch<ASAStatus>('/settings/asa', { method: 'PUT', body: JSON.stringify(body) });
 export const deleteASASettings = () => apiFetch<void>('/settings/asa', { method: 'DELETE' });
+
+// Charts -----------------------------------------------------------
+export const getChartPositions = () =>
+  apiFetch<ChartPosition[]>('/chart-positions');
+
+// Newest-first feed of chart-transition events. `sinceIso` makes the polling
+// loop cheap by only returning events newer than what we've already shown.
+export const getChartEvents = (sinceIso?: string, limit = 50) => {
+  const params = new URLSearchParams();
+  if (sinceIso) params.set('since', sinceIso);
+  params.set('limit', String(limit));
+  return apiFetch<ChartEvent[]>(`/chart-events?${params.toString()}`);
+};
+
+export const refreshCharts = () =>
+  apiFetch<{ queued: boolean }>('/charts/refresh', { method: 'POST' });
+
+export const refreshAvailability = (appId: string) =>
+  apiFetch<{ queued: boolean }>(`/apps/${appId}/availability/refresh`, { method: 'POST' });
 
 // Auth probe -------------------------------------------------------
 // Cheap way to validate the token without side effects.

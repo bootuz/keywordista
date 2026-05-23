@@ -26,6 +26,8 @@
   import GroupHeader from './GroupHeader.svelte';
   import AppSwitcher from './AppSwitcher.svelte';
   import SettingsPanel from './SettingsPanel.svelte';
+  import ChartsPage from './ChartsPage.svelte';
+  import { chartEvents, lastVisited, startChartEventPoll } from '../lib/chartEvents';
   import type { DashboardRow as Row } from '../lib/types';
 
   let loading = $state(true);
@@ -33,7 +35,18 @@
   let showAddKeyword = $state(false);
   let showAddApp = $state(false);
   let showSettings = $state(false);
+  let showCharts = $state(false);
   let historyTarget = $state<Row | null>(null);
+
+  // Unread chart events for the toolbar badge: count of events created after
+  // the last time the user opened the Charts page. Visible badge nudges them
+  // to look at the activity without competing with the keyword dashboard.
+  const chartsUnreadCount = $derived.by(() => {
+    const last = lastVisited();
+    if (!last) return $chartEvents.length;
+    const lastDate = new Date(last).getTime();
+    return $chartEvents.filter((e) => new Date(e.createdAt).getTime() > lastDate).length;
+  });
 
   // Refresh-all progress is derived directly from the row-level state:
   //   total  = number of keyword IDs in the active batch
@@ -91,6 +104,10 @@
 
   onMount(async () => {
     await load();
+    // Start the singleton chart-event poll. It fires browser notifications
+    // for new transitions and keeps the unread badge live. Safe to call from
+    // anywhere; the loop dedupes itself.
+    startChartEventPoll();
     // Pull the latest ASC keyword list in the background — localStorage gives
     // us instant-paint badges from the last session; this refresh keeps them
     // current if the user shipped a new version since the page was last open.
@@ -191,6 +208,22 @@
             Refresh all
           </button>
         {/if}
+        <button
+          onclick={() => (showCharts = true)}
+          title="Chart positions"
+          aria-label="Charts"
+          class="relative rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1 text-sm text-zinc-100 hover:bg-zinc-800"
+        >
+          Charts
+          {#if chartsUnreadCount > 0}
+            <span
+              class="absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-zinc-950"
+              aria-label="{chartsUnreadCount} unread chart events"
+            >
+              {chartsUnreadCount}
+            </span>
+          {/if}
+        </button>
         <button
           onclick={() => (showSettings = true)}
           title="Settings"
@@ -305,5 +338,8 @@
   {/if}
   {#if showSettings}
     <SettingsPanel onClose={() => (showSettings = false)} />
+  {/if}
+  {#if showCharts}
+    <ChartsPage onClose={() => (showCharts = false)} />
   {/if}
 </div>

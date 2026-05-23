@@ -91,6 +91,10 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateSetting())
     app.migrations.add(JobModelMigrate())
     app.migrations.add(AddFirstSeenAtToRankCheck())
+    app.migrations.add(AddPrimaryGenreIdToWatchedApp())
+    app.migrations.add(CreateAppStorefrontAvailability())
+    app.migrations.add(CreateChartPositionSnapshot())
+    app.migrations.add(CreateChartEvent())
 
     try await app.autoMigrate()
 
@@ -112,6 +116,12 @@ public func configure(_ app: Application) async throws {
     app.queues.schedule(DailyRefreshScheduler())
         .daily()
         .at("3:00am")
+    // Chart-position watchdog. Lands one hour after the keyword refresh so
+    // it doesn't pile on top of iTunes simultaneously, and 4 hours after
+    // Apple's midnight-PT chart refresh window so the RSS feeds are settled.
+    app.queues.schedule(RefreshChartsScheduler())
+        .daily()
+        .at("4:00am")
 
     // Serial worker. The original plan called for "~1 req/sec to iTunes"
     // to stay below Apple's edge throttling; running multiple workers in
