@@ -23,12 +23,6 @@ done
 REPO="$(cd "$(dirname "$SCRIPT")" && pwd)"
 cd "$REPO"
 
-# Default token if the user hasn't exported one. Personal tool, localhost only,
-# so a dev fallback keeps the launcher zero-config without surprising anyone
-# who actually set the env var.
-: "${KEYWORDISTA_API_TOKEN:=devtoken}"
-export KEYWORDISTA_API_TOKEN
-
 # First-run: install web deps if they're missing.
 if [ ! -d web/node_modules ]; then
   echo "→ installing web deps (first run)…"
@@ -40,7 +34,7 @@ fi
 echo "→ building web bundle…"
 (cd web && npm run build --silent)
 
-echo "→ starting Vapor on http://127.0.0.1:8080  (token: $KEYWORDISTA_API_TOKEN)"
+echo "→ starting Vapor on http://127.0.0.1:8080"
 echo
 # `exec` so Ctrl+C goes straight to Vapor — no orphan processes on Ctrl+C.
 exec swift run

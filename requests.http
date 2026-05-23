@@ -1,29 +1,17 @@
 # Keywordista API — manual exercise sheet.
 # Works with VS Code "REST Client" extension and JetBrains HTTP Client.
-# Adjust @token if you started the server with a different KEYWORDISTA_API_TOKEN.
 
 @host = http://127.0.0.1:8080
-@token = devtoken
 @contentType = application/json
 
 
-### 0. Health (no auth)
+### 0. Health
 GET {{host}}/health
-
-
-### 1a. Auth — missing token (expect 401)
-GET {{host}}/api/v1/apps
-
-
-### 1b. Auth — wrong token (expect 401)
-GET {{host}}/api/v1/apps
-Authorization: Bearer not-the-token
 
 
 ### 2. Add Azri as a watched app
 # Save the response's "id" into @azriId below.
 POST {{host}}/api/v1/apps
-Authorization: Bearer {{token}}
 Content-Type: {{contentType}}
 
 {
@@ -34,7 +22,6 @@ Content-Type: {{contentType}}
 
 ### 3. Add Quizlet too (so you have a competitor row)
 POST {{host}}/api/v1/apps
-Authorization: Bearer {{token}}
 Content-Type: {{contentType}}
 
 {
@@ -45,7 +32,6 @@ Content-Type: {{contentType}}
 
 ### 4. List watched apps
 GET {{host}}/api/v1/apps
-Authorization: Bearer {{token}}
 
 
 ### --- Paste the UUIDs from #2 and below ---
@@ -55,7 +41,6 @@ Authorization: Bearer {{token}}
 
 ### 5. Add a keyword (immediately triggers the first refresh job)
 POST {{host}}/api/v1/keywords
-Authorization: Bearer {{token}}
 Content-Type: {{contentType}}
 
 {
@@ -66,7 +51,6 @@ Content-Type: {{contentType}}
 
 ### 6. Add another keyword
 POST {{host}}/api/v1/keywords
-Authorization: Bearer {{token}}
 Content-Type: {{contentType}}
 
 {
@@ -77,7 +61,6 @@ Content-Type: {{contentType}}
 
 ### 7. Add a Japanese keyword
 POST {{host}}/api/v1/keywords
-Authorization: Bearer {{token}}
 Content-Type: {{contentType}}
 
 {
@@ -88,7 +71,6 @@ Content-Type: {{contentType}}
 
 ### 8. List keywords
 GET {{host}}/api/v1/keywords
-Authorization: Bearer {{token}}
 
 
 ### --- Paste a keyword UUID from #5 or list response ---
@@ -97,7 +79,6 @@ Authorization: Bearer {{token}}
 
 ### 9. Validation — empty term (expect 400)
 POST {{host}}/api/v1/keywords
-Authorization: Bearer {{token}}
 Content-Type: {{contentType}}
 
 {
@@ -108,7 +89,6 @@ Content-Type: {{contentType}}
 
 ### 10. Validation — bad country code (expect 400)
 POST {{host}}/api/v1/keywords
-Authorization: Bearer {{token}}
 Content-Type: {{contentType}}
 
 {
@@ -119,54 +99,43 @@ Content-Type: {{contentType}}
 
 ### 11. Force a refresh on one keyword (returns 202 immediately, job runs async)
 POST {{host}}/api/v1/keywords/{{keywordId}}/refresh
-Authorization: Bearer {{token}}
 
 
 ### 12. Refresh ALL keywords (expect enqueued = total keyword count)
 POST {{host}}/api/v1/refresh-all
-Authorization: Bearer {{token}}
 
 
 ### 13. Dashboard — all countries
 GET {{host}}/api/v1/dashboard
-Authorization: Bearer {{token}}
 
 
 ### 14. Dashboard — US only
 GET {{host}}/api/v1/dashboard?country=us
-Authorization: Bearer {{token}}
 
 
 ### 15. Dashboard — JP only
 GET {{host}}/api/v1/dashboard?country=jp
-Authorization: Bearer {{token}}
 
 
 ### 16. History for Azri on the keyword (run #11 a few times, then watch this grow)
 GET {{host}}/api/v1/keywords/{{keywordId}}/history?watchedAppId={{azriId}}
-Authorization: Bearer {{token}}
 
 
 ### 17. History for Quizlet on the same keyword
 GET {{host}}/api/v1/keywords/{{keywordId}}/history?watchedAppId={{quizletId}}
-Authorization: Bearer {{token}}
 
 
 ### 18. Refresh — unknown keyword (expect 404)
 POST {{host}}/api/v1/keywords/00000000-0000-0000-0000-000000000000/refresh
-Authorization: Bearer {{token}}
 
 
 ### 19. Delete a keyword (cascades to its rank_checks + top_result_snapshots)
 DELETE {{host}}/api/v1/keywords/{{keywordId}}
-Authorization: Bearer {{token}}
 
 
 ### 20. Delete a watched app (cascades rank_checks)
 DELETE {{host}}/api/v1/apps/{{quizletId}}
-Authorization: Bearer {{token}}
 
 
 ### 21. Confirm cascade — dashboard should drop the deleted rows
 GET {{host}}/api/v1/dashboard
-Authorization: Bearer {{token}}
