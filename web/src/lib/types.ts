@@ -100,3 +100,30 @@ export interface SuggestionRow {
   alreadyTracked: boolean;
   currentRank: number | null;
 }
+
+// Chart-position watchdog DTOs. Mirror Sources/App/Controllers/ChartsController.swift.
+
+export interface ChartPosition {
+  appId: string;
+  appName: string;
+  country: string;
+  chartType: string;
+  genreId: number;
+  position: number;
+  observedAt: string;
+}
+
+export type ChartEventKind = 'entered' | 'moved' | 'exited';
+
+export interface ChartEvent {
+  id: string;
+  appId: string;
+  appName: string;
+  country: string;
+  chartType: string;
+  genreId: number;
+  kind: ChartEventKind;
+  position: number | null;
+  prevPosition: number | null;
+  createdAt: string;
+}
