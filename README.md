@@ -14,7 +14,13 @@ Tracks where your apps rank for a set of keywords across any of Apple's 175 App 
 
 ## Install
 
-> macOS 13+, Swift 5.10+, Node 18+.
+> macOS 13+.
+
+**Download the DMG.** [Keywordista-0.1.0.dmg](https://github.com/bootuz/keywordista/releases/download/app-v0.1.0/Keywordista-0.1.0.dmg) (30 MB, signed + notarized). Drag `Keywordista.app` into `/Applications`, launch it, and a magnifying-glass icon appears in your menu bar. Click **Open Dashboard** → the browser opens `http://127.0.0.1:8080/` (auto-picks `:8081…:8090` if `:8080` is taken). Newer versions are at the [releases page](https://github.com/bootuz/keywordista/releases?q=app-v).
+
+### Build from source
+
+If you want to hack on it, you'll also need Swift 5.10+ and Node 18+.
 
 ```bash
 git clone https://github.com/bootuz/keywordista.git
@@ -22,9 +28,7 @@ cd keywordista
 make open-mac-app
 ```
 
-This builds the Vapor server, builds the SPA, assembles `Keywordista.app`, and opens it. A magnifying-glass icon appears in your menu bar. Click **Open Dashboard** → the browser opens `http://127.0.0.1:8080/` (auto-picks `:8081…:8090` if `:8080` is taken).
-
-Prefer no menu-bar app? Run `./keywordista` to `exec` the Vapor server in the foreground at `:8080`, with data in `./db.sqlite` instead of `~/Library/Application Support/Keywordista/`.
+Same `.app` as the DMG, built from your local tree. For a headless run without the menu-bar app, use `./keywordista` — it `exec`s the Vapor server in the foreground at `:8080`, with data in `./db.sqlite` instead of `~/Library/Application Support/Keywordista/`.
 
 ---
 
