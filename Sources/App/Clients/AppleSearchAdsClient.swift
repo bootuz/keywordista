@@ -8,13 +8,17 @@ import Vapor
 //   1. The user pastes their own *long-lived* JWT (up to 180 days) into the
 //      ASA settings form. We store it in `clientSecret`. The JWT is generated
 //      offline by the user using their EC private key — keywordista never
-//      sees the private key.
+//      sees the private key. Apple's current OAuth surface treats this JWT
+//      as the `client_secret` value (not a JWT-bearer `client_assertion`).
 //   2. On each API call we hold an in-memory `ASATokenCache` that exchanges
 //      that JWT for a short-lived (1-hour) OAuth access token via
-//      https://appleid.apple.com/auth/oauth2/token. Subsequent calls reuse
-//      the cached token until ~3 min before it expires.
+//      https://appleid.apple.com/auth/oauth2/token. Per Apple's docs the
+//      exchange uses URL query parameters with an empty body. Subsequent
+//      calls reuse the cached token until ~3 min before it expires.
 //   3. Downstream ASA calls use `Authorization: Bearer <access_token>` plus
-//      `X-AP-Context: orgId=<orgId>` when `orgId` is configured.
+//      `X-AP-Context: orgId=<orgId>` when `orgId` is configured. The OAuth
+//      call itself does *not* take `X-AP-Context` — it's only for the data
+//      endpoints.
 //
 // The cache is a process-singleton (wired via `Application.storage`) so that
 // a busy request cycle doesn't burn 100 OAuth round-trips.
@@ -364,29 +368,25 @@ actor ASATokenCache {
         http: any ASAHTTPClient,
         logger: Logger
     ) async throws -> Exchanged {
-        // Form-urlencoded body per RFC 6749 / Apple's docs. The user's stored
-        // `clientSecret` is the JWT they generated offline — Apple calls this
-        // `client_assertion`, not `client_secret`, despite our storage naming.
-        let form = [
+        // Apple's documented shape: all params on the URL query, empty body.
+        // The user's stored `clientSecret` (a JWT they generated offline) is
+        // passed verbatim as `client_secret`.
+        let query = [
             "grant_type=client_credentials",
             "client_id=\(percent(credentials.clientId))",
-            "client_assertion=\(percent(credentials.clientSecret))",
-            "client_assertion_type=urn%3Aietf%3Aparams%3Aoauth%3Aclient-assertion-type%3Ajwt-bearer",
+            "client_secret=\(percent(credentials.clientSecret))",
             "scope=searchadsorg",
         ].joined(separator: "&")
+        let url = AppleSearchAdsClient.oauthURL + "?" + query
 
         var headers = HTTPHeaders()
         headers.add(name: "Content-Type", value: "application/x-www-form-urlencoded")
         headers.add(name: "Accept", value: "application/json")
-        // Some ASA orgs require X-AP-Context even on the OAuth call.
-        if let orgId = credentials.orgId, !orgId.isEmpty {
-            headers.add(name: "X-AP-Context", value: "orgId=\(orgId)")
-        }
 
         let response = try await http.post(
-            url: AppleSearchAdsClient.oauthURL,
+            url: url,
             headers: headers,
-            body: Data(form.utf8)
+            body: Data()
         )
 
         guard response.status == .ok, let buffer = response.body else {
