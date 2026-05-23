@@ -198,3 +198,42 @@ jobs:
             releases/*.dmg
             releases/*.dmg.sha256
           retention-days: 14
+
+      - name: Bump README DMG link to this release
+        # Rewrites the marker block in README.md so the public download link
+        # always points at the freshly-released DMG. Skipped on manual
+        # workflow_dispatch runs (dry-runs shouldn't mutate main).
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Switch from the tag-detached HEAD to a fresh main checkout.
+          git fetch origin main
+          git checkout -B main origin/main
+
+          # Splice the canonical block between the LATEST_DMG markers. Using
+          # awk so the multi-line replacement is portable (sed -i differs
+          # between BSD and GNU).
+          NEW_BLOCK="**Download the latest DMG:** [Keywordista-${VERSION}.dmg](https://github.com/bootuz/keywordista/releases/download/app-v${VERSION}/Keywordista-${VERSION}.dmg) (signed + notarized). Drag \`Keywordista.app\` into \`/Applications\` and launch — a magnifying-glass icon appears in your menu bar."
+          awk -v new="$NEW_BLOCK" '
+            /<!-- LATEST_DMG_BEGIN -->/{print; print new; skip=1; next}
+            /<!-- LATEST_DMG_END -->/{skip=0}
+            !skip
+          ' README.md > README.md.tmp
+          mv README.md.tmp README.md
+
+          if git diff --quiet README.md; then
+            echo "README already points at v${VERSION} — nothing to commit."
+            exit 0
+          fi
+
+          # The CI `paths-ignore` rule already keeps README-only changes from
+          # re-triggering the pipeline; `[skip ci]` is belt-and-suspenders.
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "README: bump DMG download link to v${VERSION} [skip ci]"
+          git push origin main
