@@ -1,4 +1,5 @@
 import Fluent
+import FluentSQLiteDriver
 import Foundation
 import Queues
 import QueuesFluentDriver
@@ -6,30 +7,6 @@ import SQLKit
 import Vapor
 
 public func configure(_ app: Application) async throws {
-    // ── Env-var contract ──────────────────────────────────────────────
-    //
-    // Resolve and validate the §4.6.3 env-var contract once at boot,
-    // BEFORE any other init. Missing-required-var failures surface here
-    // with a clear "KEYWORDISTA_X is required in server mode" message —
-    // far less confusing than discovering halfway through migration
-    // setup that ENCRYPTION_KEY is missing. See Sources/App/Config/
-    // EnvVarManifest.swift for the typed accessors.
-    let manifest = try Manifest.bootstrap()
-
-    // ── Default bind address & port ───────────────────────────────────
-    //
-    // Server mode → 0.0.0.0 (public PaaS deploy: container needs to
-    // accept connections from the provider's load balancer);
-    // local mode → 127.0.0.1 (Mac menubar spawn: only the local
-    // browser talks to it).
-    //
-    // The menubar app's ServiceSupervisor still passes the explicit
-    // `--hostname 127.0.0.1 --port <chosen>` CLI flags. Vapor's CLI
-    // flags override these defaults if both are set, so behavior for
-    // the existing menubar path is unchanged.
-    app.http.server.configuration.hostname = try manifest.require(EnvVars.hostname)
-    app.http.server.configuration.port = try manifest.require(EnvVars.port)
-
     // ── JSON date precision ────────────────────────────────────────────
     //
     // Vapor's default .iso8601 strategy emits dates with whole-second
@@ -79,7 +56,7 @@ public func configure(_ app: Application) async throws {
     // When unset (dev / source builds), fall back to Vapor's convention.
     // FileMiddleware wants a trailing slash; tolerate either form from the
     // env var.
-    let rawPublicDir = try manifest.optional(EnvVars.publicDir) ?? app.directory.publicDirectory
+    let rawPublicDir = Environment.get("KEYWORDISTA_PUBLIC_DIR") ?? app.directory.publicDirectory
     let publicDir = rawPublicDir.hasSuffix("/") ? rawPublicDir : rawPublicDir + "/"
 
     // Static files (Public/) — serves built SPA assets in production.
@@ -90,13 +67,22 @@ public func configure(_ app: Application) async throws {
     // client-side routes (refresh on /dashboard, /settings, etc.) keep working.
     app.middleware.use(SPAFallbackMiddleware(indexPath: publicDir + "index.html"))
 
-    // Database driver. Routes per §4.10: DATABASE_URL → Postgres,
-    // otherwise SQLite at DATABASE_PATH. Local mode (menubar-spawned)
-    // always resolves to SQLite. Driver-specific tuning (SQLite PRAGMAs)
-    // is encapsulated in DatabaseProvider and a no-op for Postgres.
-    let database = try DatabaseProvider.resolve(from: manifest)
-    try database.register(on: app)
-    try await database.applyDriverSpecificTuning(on: app)
+    let dbPath = Environment.get("DATABASE_PATH") ?? "db.sqlite"
+    app.databases.use(.sqlite(.file(dbPath)), as: .sqlite)
+
+    // SQLite tuning. Two changes that together eliminate the "database is
+    // locked" storm we hit with parallel jobs:
+    //   • WAL journal mode lets a writer and many readers run concurrently
+    //     without exclusive locks. The mode change is persistent in the
+    //     .db file header — runs once, sticks across restarts.
+    //   • busy_timeout asks SQLite to wait up to 5s for a contended lock to
+    //     clear instead of immediately returning SQLITE_BUSY. Combined with
+    //     serial queue workers (below), this is enough headroom for the
+    //     dashboard's reads to never collide with a writer.
+    if let sql = app.db as? any SQLDatabase {
+        try await sql.raw("PRAGMA journal_mode=WAL").run()
+        try await sql.raw("PRAGMA busy_timeout=5000").run()
+    }
 
     app.migrations.add(CreateWatchedApp())
     app.migrations.add(CreateKeyword())
