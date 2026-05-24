@@ -41,21 +41,21 @@
 </script>
 
 {#if indicator.kind === 'up'}
-  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-400" title="Improved by {indicator.positions} since last check">
+  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400" title="Improved by {indicator.positions} since last check">
     <span>▲</span><span>{indicator.positions}</span>
   </span>
 {:else if indicator.kind === 'down'}
-  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-red-400" title="Dropped by {indicator.positions} since last check">
+  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-red-600 dark:text-red-400" title="Dropped by {indicator.positions} since last check">
     <span>▼</span><span>{indicator.positions}</span>
   </span>
 {:else if indicator.kind === 'in'}
-  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-400" title="Entered top 200 since last check">
+  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400" title="Entered top 200 since last check">
     <span>▲</span><span>in</span>
   </span>
 {:else if indicator.kind === 'out'}
-  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-red-400" title="Dropped out of top 200 since last check">
+  <span class="inline-flex items-center gap-0.5 text-xs font-medium text-red-600 dark:text-red-400" title="Dropped out of top 200 since last check">
     <span>▼</span><span>out</span>
   </span>
 {:else if indicator.kind === 'same'}
-  <span class="text-xs text-zinc-600" title="No change since last check">—</span>
+  <span class="text-xs text-zinc-400 dark:text-zinc-600" title="No change since last check">—</span>
 {/if}

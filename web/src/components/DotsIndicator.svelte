@@ -13,7 +13,7 @@
 <div class="flex items-center gap-1">
   {#each Array(5) as _, i}
     <span
-      class="h-2 w-2 rounded-full {i < clamped ? dotClasses[clamped] : 'bg-dot-empty'}"
+      class="h-2 w-2 rounded-full {i < clamped ? dotClasses[clamped] : 'bg-zinc-300 dark:bg-dot-empty'}"
     ></span>
   {/each}
 </div>

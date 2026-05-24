@@ -12,12 +12,12 @@
   const isCollapsed = $derived($collapsedGroups.has(id));
 </script>
 
-<tr class="bg-zinc-900/80 sticky top-0">
+<tr class="bg-zinc-50/80 dark:bg-zinc-900/80 sticky top-0">
   <td {colspan} class="px-3 py-2">
     <button
       type="button"
       onclick={() => toggleCollapsed(id)}
-      class="flex w-full items-center gap-2 text-left text-zinc-200 hover:text-white"
+      class="flex w-full items-center gap-2 text-left text-zinc-800 dark:text-zinc-200 hover:text-black dark:hover:text-white"
     >
       <span class="inline-block w-3 text-zinc-500 transition" class:rotate-90={!isCollapsed}>▸</span>
       <span class="font-medium">{label}</span>

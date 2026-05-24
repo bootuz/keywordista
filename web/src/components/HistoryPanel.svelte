@@ -114,9 +114,9 @@
 
   function rankColor(r: number | null): string {
     if (r == null) return 'text-zinc-500';
-    if (r <= 10) return 'text-emerald-400';
-    if (r <= 50) return 'text-amber-400';
-    return 'text-red-400';
+    if (r <= 10) return 'text-emerald-600 dark:text-emerald-400';
+    if (r <= 50) return 'text-amber-600 dark:text-amber-400';
+    return 'text-red-600 dark:text-red-400';
   }
 
   // ── Chart helpers (unchanged from before) ────────────────────────────
@@ -161,29 +161,31 @@
 </script>
 
 <aside
-  class="fixed inset-y-0 right-0 z-40 flex w-[640px] max-w-full flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl"
+  class="fixed inset-y-0 right-0 z-40 flex w-[640px] max-w-full flex-col border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-2xl"
 >
-  <header class="flex items-baseline justify-between border-b border-zinc-800 px-6 py-4">
+  <header class="flex items-baseline justify-between border-b border-zinc-200 dark:border-zinc-800 px-6 py-4">
     <div class="min-w-0">
       <div class="flex items-center gap-2">
-        <h2 class="truncate text-base font-semibold text-zinc-100">{keywordTerm}</h2>
+        <h2 class="truncate text-base font-semibold text-zinc-900 dark:text-zinc-100">{keywordTerm}</h2>
         <CountryFlag code={countryCode} />
       </div>
       <p class="text-sm text-zinc-500">{watchedAppName}</p>
     </div>
-    <button onclick={onClose} class="text-sm text-zinc-500 hover:text-zinc-300">Close</button>
+    <button onclick={onClose} class="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">Close</button>
   </header>
 
   <!-- Tab strip -->
-  <nav class="flex border-b border-zinc-800 px-6">
+  <nav class="flex border-b border-zinc-200 dark:border-zinc-800 px-6">
     <button
       onclick={() => selectTab('history')}
       class="-mb-px border-b-2 px-3 py-2 text-sm transition"
       class:border-amber-400={activeTab === 'history'}
-      class:text-zinc-100={activeTab === 'history'}
+      class:text-zinc-900={activeTab === 'history'}
+      class:dark:text-zinc-100={activeTab === 'history'}
       class:border-transparent={activeTab !== 'history'}
       class:text-zinc-500={activeTab !== 'history'}
-      class:hover:text-zinc-300={activeTab !== 'history'}
+      class:hover:text-zinc-700={activeTab !== 'history'}
+      class:dark:hover:text-zinc-300={activeTab !== 'history'}
     >
       History
     </button>
@@ -191,10 +193,12 @@
       onclick={() => selectTab('related')}
       class="-mb-px border-b-2 px-3 py-2 text-sm transition"
       class:border-amber-400={activeTab === 'related'}
-      class:text-zinc-100={activeTab === 'related'}
+      class:text-zinc-900={activeTab === 'related'}
+      class:dark:text-zinc-100={activeTab === 'related'}
       class:border-transparent={activeTab !== 'related'}
       class:text-zinc-500={activeTab !== 'related'}
-      class:hover:text-zinc-300={activeTab !== 'related'}
+      class:hover:text-zinc-700={activeTab !== 'related'}
+      class:dark:hover:text-zinc-300={activeTab !== 'related'}
     >
       Related
     </button>
@@ -205,13 +209,13 @@
       {#if loading}
         <p class="text-sm text-zinc-500">Loading history…</p>
       {:else if error}
-        <p class="text-sm text-red-400">{error}</p>
+        <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
       {:else if points.length === 0}
         <p class="text-sm text-zinc-500">No checks yet.</p>
       {:else}
         <svg
           viewBox="0 0 {chartWidth} {chartHeight}"
-          class="w-full rounded-md border border-zinc-800 bg-zinc-900 p-2"
+          class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-2"
         >
           <polyline points={polyline} fill="none" stroke="#a1a1aa" stroke-width="1.5" />
           {#each points as p}
@@ -243,11 +247,11 @@
           </thead>
           <tbody>
             {#each [...points].reverse() as p}
-              <tr class="border-t border-zinc-800">
-                <td class="py-1.5 text-zinc-300">{new Date(p.checkedAt).toLocaleString()}</td>
-                <td class="text-zinc-100">{formatRank(p.rank)}</td>
-                <td class="text-zinc-400">{p.difficulty}/5</td>
-                <td class="text-zinc-400">{p.entryBarrier}/5</td>
+              <tr class="border-t border-zinc-200 dark:border-zinc-800">
+                <td class="py-1.5 text-zinc-700 dark:text-zinc-300">{new Date(p.checkedAt).toLocaleString()}</td>
+                <td class="text-zinc-900 dark:text-zinc-100">{formatRank(p.rank)}</td>
+                <td class="text-zinc-600 dark:text-zinc-400">{p.difficulty}/5</td>
+                <td class="text-zinc-600 dark:text-zinc-400">{p.entryBarrier}/5</td>
               </tr>
             {/each}
           </tbody>
@@ -258,11 +262,11 @@
       {#if suggestionsLoading}
         <p class="text-sm text-zinc-500">Looking up search terms from your Apple Search Ads campaign…</p>
       {:else if suggestionsError}
-        <p class="text-sm text-red-400">{suggestionsError}</p>
+        <p class="text-sm text-red-600 dark:text-red-400">{suggestionsError}</p>
         <button
           type="button"
           onclick={() => { suggestions = null; void loadSuggestions(); }}
-          class="mt-2 text-xs text-amber-400 hover:underline"
+          class="mt-2 text-xs text-amber-600 dark:text-amber-400 hover:underline"
         >
           Retry
         </button>
@@ -277,7 +281,7 @@
       {:else}
         <p class="mb-3 text-xs text-zinc-500">
           Queries from your Apple Search Ads campaigns in {countryCode.toUpperCase()} that mention
-          <span class="text-zinc-300">{keywordTerm}</span>. Sorted by impressions.
+          <span class="text-zinc-700 dark:text-zinc-300">{keywordTerm}</span>. Sorted by impressions.
         </p>
 
         <table class="w-full text-sm">
@@ -292,32 +296,34 @@
           </thead>
           <tbody>
             {#each visibleSuggestions as s}
-              <tr class="border-t border-zinc-800">
-                <td class="py-1.5 text-zinc-100">
+              <tr class="border-t border-zinc-200 dark:border-zinc-800">
+                <td class="py-1.5 text-zinc-900 dark:text-zinc-100">
                   {s.term}
                   {#if s.alreadyTracked && s.currentRank != null}
                     <span class="ml-1 text-xs {rankColor(s.currentRank)}">#{s.currentRank}</span>
                   {/if}
                 </td>
-                <td class="text-right text-zinc-300 tabular-nums">{s.impressions}</td>
-                <td class="text-right text-zinc-300 tabular-nums">{s.taps}</td>
+                <td class="text-right text-zinc-700 dark:text-zinc-300 tabular-nums">{s.impressions}</td>
+                <td class="text-right text-zinc-700 dark:text-zinc-300 tabular-nums">{s.taps}</td>
                 <td
                   class="text-right tabular-nums"
-                  class:text-emerald-400={s.ttr >= 0.1}
-                  class:text-zinc-300={s.ttr < 0.1}
+                  class:text-emerald-600={s.ttr >= 0.1}
+                  class:dark:text-emerald-400={s.ttr >= 0.1}
+                  class:text-zinc-700={s.ttr < 0.1}
+                  class:dark:text-zinc-300={s.ttr < 0.1}
                 >
                   {formatTTR(s.ttr)}
                 </td>
                 <td class="py-1.5 pl-3 text-right">
                   {#if addedTerms.has(s.term)}
-                    <span class="text-xs text-emerald-400">Added ✓</span>
+                    <span class="text-xs text-emerald-600 dark:text-emerald-400">Added ✓</span>
                   {:else if s.alreadyTracked}
-                    <span class="text-xs text-zinc-600">tracked</span>
+                    <span class="text-xs text-zinc-400 dark:text-zinc-600">tracked</span>
                   {:else}
                     <button
                       type="button"
                       onclick={() => addSuggestion(s.term)}
-                      class="rounded bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-950 hover:bg-white"
+                      class="rounded bg-zinc-900 dark:bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-50 dark:text-zinc-950 hover:bg-zinc-700 dark:hover:bg-white"
                     >
                       + Add
                     </button>
@@ -332,7 +338,7 @@
           <button
             type="button"
             onclick={() => (showTracked = !showTracked)}
-            class="mt-3 text-xs text-zinc-500 hover:text-zinc-300"
+            class="mt-3 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
           >
             {showTracked ? 'Hide' : 'Show'} {trackedCount} already tracked
           </button>

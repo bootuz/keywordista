@@ -82,7 +82,7 @@
   <button
     type="button"
     onclick={() => (open = !open)}
-    class="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-sm text-zinc-100 hover:bg-zinc-800"
+    class="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
     aria-haspopup="listbox"
     aria-expanded={open}
   >
@@ -94,14 +94,14 @@
   {#if open}
     <div
       role="listbox"
-      class="absolute left-0 top-full z-30 mt-1 w-72 overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 shadow-xl"
+      class="absolute left-0 top-full z-30 mt-1 w-72 overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 shadow-xl"
     >
-      <div class="border-b border-zinc-800 p-2">
+      <div class="border-b border-zinc-200 dark:border-zinc-800 p-2">
         <input
           type="search"
           placeholder="Filter countries…"
           bind:value={search}
-          class="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none"
         />
       </div>
 
@@ -113,32 +113,33 @@
             role="option"
             aria-selected={active}
             onclick={() => toggle(cc)}
-            class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-zinc-800"
+            class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             <span
               class="grid h-4 w-4 place-items-center rounded border text-[10px]"
               class:border-amber-500={active}
               class:bg-amber-500={active}
               class:text-zinc-950={active}
-              class:border-zinc-700={!active}
+              class:border-zinc-300={!active}
+              class:dark:border-zinc-700={!active}
             >
               {active ? '✓' : ''}
             </span>
             <span>{isoCountryToFlag(cc)}</span>
             <span class="w-7 font-mono text-xs uppercase text-zinc-500">{cc}</span>
-            <span class="text-zinc-200">{nameOf(cc)}</span>
+            <span class="text-zinc-800 dark:text-zinc-200">{nameOf(cc)}</span>
           </button>
         {:else}
           <div class="px-3 py-2 text-sm text-zinc-500">No matches.</div>
         {/each}
       </div>
 
-      <div class="flex items-center justify-between gap-2 border-t border-zinc-800 px-2 py-1.5 text-xs">
-        <button type="button" onclick={clearAll} class="text-zinc-500 hover:text-zinc-200">
+      <div class="flex items-center justify-between gap-2 border-t border-zinc-200 dark:border-zinc-800 px-2 py-1.5 text-xs">
+        <button type="button" onclick={clearAll} class="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
           Clear
         </button>
-        <span class="text-zinc-600">{selected.length} of {options.length} selected</span>
-        <button type="button" onclick={selectAll} class="text-zinc-500 hover:text-zinc-200">
+        <span class="text-zinc-400 dark:text-zinc-600">{selected.length} of {options.length} selected</span>
+        <button type="button" onclick={selectAll} class="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
           Select all
         </button>
       </div>

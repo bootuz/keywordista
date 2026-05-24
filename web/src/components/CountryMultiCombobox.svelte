@@ -121,20 +121,20 @@
         if (!open) openMenu();
       }
     }}
-    class="flex w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-left text-sm text-zinc-100 hover:border-zinc-600 focus:border-zinc-500 focus:outline-none"
+    class="flex w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1.5 text-left text-sm text-zinc-900 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-600 focus:border-zinc-500 focus:outline-none"
   >
     {#if selected.length === 0}
       <span class="px-1 text-zinc-500">{placeholder}</span>
     {:else}
       {#each selected as cc (cc)}
-        <span class="inline-flex items-center gap-1 rounded bg-zinc-800 py-0.5 pl-1.5 pr-1 text-xs">
+        <span class="inline-flex items-center gap-1 rounded bg-zinc-100 dark:bg-zinc-800 py-0.5 pl-1.5 pr-1 text-xs">
           <span>{isoCountryToFlag(cc)}</span>
-          <span class="font-mono uppercase text-zinc-200">{cc}</span>
+          <span class="font-mono uppercase text-zinc-800 dark:text-zinc-200">{cc}</span>
           <button
             type="button"
             aria-label={`Remove ${appStoreCountryName(cc)}`}
             onclick={(e) => removeOne(cc, e)}
-            class="ml-0.5 grid h-4 w-4 place-items-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+            class="ml-0.5 grid h-4 w-4 place-items-center rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-zinc-100"
           >
             ×
           </button>
@@ -148,15 +148,15 @@
     <div
       id="country-multi-listbox"
       role="listbox"
-      class="absolute left-0 top-full z-30 mt-1 w-full overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 shadow-xl"
+      class="absolute left-0 top-full z-30 mt-1 w-full overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 shadow-xl"
     >
-      <div class="border-b border-zinc-800 p-2">
+      <div class="border-b border-zinc-200 dark:border-zinc-800 p-2">
         <input
           bind:this={searchEl}
           type="search"
           placeholder="Search by name or code…"
           bind:value={search}
-          class="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-2 py-1 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none"
         />
       </div>
 
@@ -172,19 +172,21 @@
             onmouseenter={() => (highlight = idx)}
             onclick={() => toggle(cc)}
             class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm"
-            class:bg-zinc-800={isHighlighted}
+            class:bg-zinc-100={isHighlighted}
+            class:dark:bg-zinc-800={isHighlighted}
           >
             <span
               class="grid h-4 w-4 place-items-center rounded border text-[10px]"
               class:border-amber-500={active}
               class:bg-amber-500={active}
               class:text-zinc-950={active}
-              class:border-zinc-700={!active}
+              class:border-zinc-300={!active}
+              class:dark:border-zinc-700={!active}
             >
               {active ? '✓' : ''}
             </span>
             <span>{isoCountryToFlag(cc)}</span>
-            <span class="text-zinc-200">{appStoreCountryName(cc)}</span>
+            <span class="text-zinc-800 dark:text-zinc-200">{appStoreCountryName(cc)}</span>
             <span class="ml-auto font-mono text-xs uppercase text-zinc-500">({cc})</span>
           </button>
         {:else}
@@ -192,9 +194,9 @@
         {/each}
       </div>
 
-      <div class="flex items-center justify-between border-t border-zinc-800 px-2 py-1.5 text-xs text-zinc-500">
+      <div class="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 px-2 py-1.5 text-xs text-zinc-500">
         <span>{selected.length} selected</span>
-        <button type="button" onclick={closeMenu} class="hover:text-zinc-200">Done</button>
+        <button type="button" onclick={closeMenu} class="hover:text-zinc-800 dark:hover:text-zinc-200">Done</button>
       </div>
     </div>
   {/if}

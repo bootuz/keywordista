@@ -20,8 +20,9 @@
   <button
     type="button"
     onclick={() => toggleSort(column)}
-    class="group inline-flex items-center gap-1 text-xs uppercase tracking-wide text-zinc-500 hover:text-zinc-200"
-    class:text-zinc-200={isActive}
+    class="group inline-flex items-center gap-1 text-xs uppercase tracking-wide text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+    class:text-zinc-800={isActive}
+    class:dark:text-zinc-200={isActive}
   >
     {label}
     <span class="inline-flex w-3 text-[10px]">

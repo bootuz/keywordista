@@ -5,8 +5,28 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Keywordista</title>
+    <script>
+      // Inline boot — runs before first paint to prevent a flash of the
+      // wrong colour scheme. <html> ships with class="dark" as the brand
+      // default; we only flip it off if the user picked light, or picked
+      // system and the OS is currently in light mode.
+      // Mirrors `loadTheme` / `resolveIsDark` in src/lib/theme.ts — keep
+      // these in sync if you change the storage key or the default.
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          var dark =
+            t === 'dark' ||
+            t == null ||
+            (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+          if (!dark) document.documentElement.classList.remove('dark');
+        } catch (e) {
+          /* swallow — leave the default 'dark' class on <html> */
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-zinc-950 text-zinc-100">
+  <body class="bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
