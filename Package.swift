@@ -42,6 +42,10 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 .target(name: "App"),
+                // M1.12: XCTVapor ships with the main vapor package
+                // (no new repo dep). Powers real-HTTP integration
+                // tests of the auth flow + admin gating.
+                .product(name: "XCTVapor", package: "vapor"),
             ],
             path: "Tests/AppTests"
         ),
