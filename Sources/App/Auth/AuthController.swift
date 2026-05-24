@@ -20,7 +20,9 @@ import Vapor
 ///   • `POST /api/v1/auth/login`          — email + password
 ///   • `POST /api/v1/auth/logout`         — clears cookie + DB row
 ///   • `POST /api/v1/auth/accept-invite`  — token + password [+ email]
-///   • `GET  /api/v1/auth/state`          — { firstRun, signedIn, user? }
+///   • `GET  /api/v1/auth/invite/:token`  — pre-validate an invite (for the
+///                                          SPA's "set your password" page)
+///   • `GET  /api/v1/auth/state`          — { mode, firstRun, signedIn, user? }
 ///
 /// **Cookie**: all success paths Set-Cookie the session token via
 /// `SessionCookie.value(...)`. Logout sends `SessionCookie.cleared()`.
@@ -39,20 +41,31 @@ struct AuthController {
     let hasher: PasswordHasher
     let sessionTTLDays: Int
     let inviteTTLDays: Int
+    /// Surfaced in `/auth/state` so the SPA can branch on `local` vs
+    /// `server` without having to probe (e.g., the menubar-spawned
+    /// backend can render the dashboard directly, no login UI).
+    let mode: RuntimeMode
 
-    init(hasher: PasswordHasher, sessionTTLDays: Int, inviteTTLDays: Int) {
+    init(
+        hasher: PasswordHasher,
+        sessionTTLDays: Int,
+        inviteTTLDays: Int,
+        mode: RuntimeMode
+    ) {
         self.hasher = hasher
         self.sessionTTLDays = sessionTTLDays
         self.inviteTTLDays = inviteTTLDays
+        self.mode = mode
     }
 
-    /// Registers the five auth routes under `/api/v1/auth/*`.
+    /// Registers all auth routes under `/api/v1/auth/*`.
     /// M1.10's routes.swift calls this with the `/api/v1/auth` group.
     func register(on routes: any RoutesBuilder) {
         routes.post("setup", use: setup)
         routes.post("login", use: login)
         routes.post("logout", use: logout)
         routes.post("accept-invite", use: acceptInvite)
+        routes.get("invite", ":token", use: validateInvite)
         routes.get("state", use: state)
     }
 
@@ -206,11 +219,57 @@ struct AuthController {
         return try await issueSessionResponse(for: user, req: req, status: .created)
     }
 
+    // MARK: - GET /invite/:token
+
+    /// Pre-validate an invite token without consuming it. The SPA's
+    /// InviteAcceptPage hits this on mount so it can show "Invalid
+    /// link" / "Expired" / "Already accepted" *before* asking the
+    /// user to type a password — otherwise the UX is "fill out the
+    /// form, hit submit, get yelled at."
+    ///
+    /// **Returns**:
+    ///   • 200 `InviteSummary` — token is good; show the form.
+    ///   • 404 — token doesn't exist (or is malformed).
+    ///   • 410 — already consumed (admin can re-invite if needed).
+    ///   • 422 — expired (admin can re-invite).
+    ///
+    /// Status-code semantics MATCH `acceptInvite`'s rejection paths
+    /// so the SPA can use the same error-handling logic for both.
+    func validateInvite(req: Request) async throws -> InviteSummary {
+        let rawToken = req.parameters.get("token") ?? ""
+        let token = try AuthInputs.validateInviteToken(rawToken)
+
+        guard let invite = try await Invite.query(on: req.db)
+            .filter(\.$token == token)
+            .first()
+        else {
+            throw Abort(.notFound, reason: "invite not found")
+        }
+
+        if invite.isConsumed {
+            throw Abort(.gone, reason: "invite has already been accepted")
+        }
+        if invite.isExpired() {
+            throw Abort(.unprocessableEntity, reason: "invite has expired")
+        }
+
+        return InviteSummary(
+            email: invite.email,
+            role: invite.role.rawValue,
+            expiresAt: invite.expiresAt
+        )
+    }
+
     // MARK: - GET /state
 
     /// Cheap state probe the SPA hits on app boot to decide between
     /// SetupWizard / LoginPage / Dashboard. Always returns 200; the
     /// frontend reads the booleans.
+    ///
+    /// `mode` lets the SPA distinguish the local-mode backend (where
+    /// auth UI should be hidden entirely) from the server-mode one
+    /// (where it should be enforced). Without this field the SPA
+    /// would have to infer mode by probing endpoints, which is racy.
     func state(req: Request) async throws -> AuthStateResponse {
         let userCount = try await User.query(on: req.db).count()
         let firstRun = userCount == 0
@@ -228,6 +287,7 @@ struct AuthController {
         }
 
         return AuthStateResponse(
+            mode: mode.rawValue,
             firstRun: firstRun,
             signedIn: currentUser != nil,
             user: currentUser.map(UserResponse.init(user:))
@@ -307,9 +367,30 @@ struct AuthSuccessResponse: Content {
 }
 
 struct AuthStateResponse: Content {
+    /// "local" or "server". The SPA hides every auth UI in local mode.
+    let mode: String
     let firstRun: Bool
     let signedIn: Bool
     let user: UserResponse?
+}
+
+/// Body of GET /api/v1/auth/invite/:token. Minimal on purpose —
+/// just enough for the SPA to render an honest "set your password"
+/// form. We deliberately do NOT echo the createdBy user, the original
+/// invite ID, or anything else an attacker shouldn't learn from
+/// possessing a guessed token. (Tokens are 256-bit random, so guessing
+/// is infeasible, but defense-in-depth.)
+struct InviteSummary: Content {
+    /// Email pre-pinned to the invite (admin specified one when
+    /// creating). `nil` for "open" invites where the recipient
+    /// supplies their own email at accept time.
+    let email: String?
+    /// "admin" or "member" — matches User.Role.rawValue.
+    let role: String
+    /// When this invite stops being valid. The SPA shows a relative
+    /// countdown ("expires in 4 days") so the recipient isn't
+    /// surprised.
+    let expiresAt: Date
 }
 
 // MARK: - Decoy hash for constant-time login

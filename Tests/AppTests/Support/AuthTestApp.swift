@@ -55,7 +55,12 @@ enum AuthTestApp {
         let authController = AuthController(
             hasher: try PasswordHasher(cost: bcryptCost),
             sessionTTLDays: sessionTTLDays,
-            inviteTTLDays: inviteTTLDays
+            inviteTTLDays: inviteTTLDays,
+            // Server mode because the auth tests exercise the
+            // protected route surface — local-mode integration
+            // (auth-UI hidden, no middleware) is verified
+            // separately via routes.swift code review.
+            mode: .server
         )
         authController.register(on: api.grouped("auth"))
 

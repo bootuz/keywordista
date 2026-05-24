@@ -46,12 +46,13 @@ func routes(_ app: Application, manifest: Manifest) throws {
     // sign in). Same routes registered in both modes; in local mode
     // the setup/login/logout/accept-invite handlers are functionally
     // moot (no User rows exist) but /state still returns useful
-    // { firstRun: false, signedIn: false, user: nil } so the SPA
-    // can branch on it without mode-detection logic.
+    // { mode: "local", firstRun: false, signedIn: false, user: nil }
+    // so the SPA can hide all auth UI entirely without probing.
     let authController = AuthController(
         hasher: try PasswordHasher(cost: try manifest.require(EnvVars.bcryptCost)),
         sessionTTLDays: try manifest.require(EnvVars.sessionTTLDays),
-        inviteTTLDays: try manifest.require(EnvVars.inviteTTLDays)
+        inviteTTLDays: try manifest.require(EnvVars.inviteTTLDays),
+        mode: manifest.mode
     )
     authController.register(on: api.grouped("auth"))
 
