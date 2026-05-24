@@ -1,13 +1,151 @@
 <script lang="ts">
-  // Router shell. Auth-state hydration + route guards land in M2.10;
-  // for now this is the pure "match URL → render component" wiring
-  // so the rest of M2 has a place to plug their pages in.
+  // App shell + boot orchestration.
   //
-  // Hash-based: URLs are `#/`, `#/login`, `#/invite/:token`, etc.
-  // Anything not matched falls through to NotFoundPage via the '*'
-  // entry in `routes`.
-  import Router from 'svelte-spa-router';
-  import { routes } from './lib/router';
+  // Responsibilities (in order, on mount):
+  //   1. Register the 401 handler with the api layer (M2.4's IoC
+  //      hook). Fires when any API call returns 401 in server mode;
+  //      clears local auth state + pushes to /login.
+  //   2. Hydrate authState from /auth/state. AWAITED before mounting
+  //      the router — otherwise the SPA would flicker through
+  //      "Dashboard → LoginPage" on every refresh because the router
+  //      would render with the wrong route assumption.
+  //   3. Reactive route guard: derives a target path from
+  //      (authState, location) and push()es if they disagree.
+  //      Runs on every store-or-location change.
+  //
+  // Local-mode behavior is byte-identical to pre-M2 — the guard
+  // sends users away from auth routes; SPA renders Dashboard at /.
+
+  import { onMount } from 'svelte';
+  // svelte-spa-router v5 exposes a reactive `router` object (Svelte 5
+  // runes) — `router.location` replaces the legacy `location` store.
+  import Router, { router, push } from 'svelte-spa-router';
+  import { routes, ROUTES } from './lib/router';
+  import {
+    authState,
+    hydrateAuthState,
+    clearAuthState,
+  } from './lib/authStore';
+  import { setUnauthorizedHandler } from './lib/api';
+  import type { AuthState } from './lib/types';
+
+  let hydrated = $state(false);
+  let hydrateError = $state<string | null>(null);
+
+  onMount(() => {
+    // Wire the 401 hook BEFORE the first network call. apiFetch
+    // filters out /auth/* paths itself, so the LoginPage's own
+    // 401 doesn't cause a redirect loop.
+    setUnauthorizedHandler(async () => {
+      await clearAuthState();
+      push(ROUTES.login);
+    });
+
+    // Fire-and-forget hydration. We can't `await` in onMount cleanly
+    // in Svelte 5 (it returns a teardown function); do it via a
+    // local async IIFE so the boot sequence still finishes in one tick.
+    void (async () => {
+      try {
+        await hydrateAuthState();
+      } catch {
+        hydrateError = "Couldn't reach the server. Refresh to try again.";
+      } finally {
+        hydrated = true;
+      }
+    })();
+
+    // Clean up the 401 hook on teardown (HMR, tests).
+    return () => setUnauthorizedHandler(null);
+  });
+
+  // Reactive route guard.
+  //
+  // The mental model: there's a "desired location" for every
+  // (auth-state, current-location) pair. If desired != current, push.
+  // No push when they match (or we'd loop).
+  //
+  // Runs only after hydration so we don't push someone away from
+  // /invite/abc just because authState hasn't loaded yet.
+  $effect(() => {
+    if (!hydrated) return;
+    const state = $authState;
+    const path = router.location;
+    if (!state) return;
+    const target = computeRedirect(state, path);
+    if (target && target !== path) {
+      push(target);
+    }
+  });
+
+  // Pure function — returns the path the user SHOULD be on, or null
+  // if the current path is already valid. Extracted from the effect
+  // so the logic can be reasoned about (and eventually unit-tested)
+  // without spinning up a router.
+  function computeRedirect(state: AuthState, path: string): string | null {
+    // ── Local mode: no auth UI at all. ────────────────────────────
+    // Send users away from any auth-related route — the menubar app
+    // is the only client and it should never land on /login.
+    // /invite/:token is left alone to fall through to NotFoundPage
+    // (more honest than silently swallowing a link the user typed).
+    if (state.mode === 'local') {
+      if (
+        path === ROUTES.login
+        || path === ROUTES.setup
+        || path === ROUTES.usersAdmin
+      ) {
+        return ROUTES.dashboard;
+      }
+      return null;
+    }
+
+    // ── Server mode, first run: force /setup. ─────────────────────
+    // No user exists yet; every path except /setup itself is
+    // useless until an admin is created. We don't allow /invite/*
+    // here because invites are issued by users, and there are none.
+    if (state.firstRun) {
+      return path === ROUTES.setup ? null : ROUTES.setup;
+    }
+
+    // ── Server mode, setup done. ──────────────────────────────────
+    const isPublicAuthRoute =
+      path === ROUTES.login
+      || path === ROUTES.setup
+      || path.startsWith('/invite/');
+
+    // Signed-in user revisiting auth pages → bounce to dashboard.
+    if (state.signedIn && (path === ROUTES.login || path === ROUTES.setup)) {
+      return ROUTES.dashboard;
+    }
+
+    // Signed-out user trying to reach a protected route → /login.
+    // /setup is allowed to render (it'll 410 itself if hit post-
+    // setup — see SetupWizard's submit handler — but rendering is
+    // harmless and consistent with the "auth routes are public" rule).
+    if (!state.signedIn && !isPublicAuthRoute) {
+      return ROUTES.login;
+    }
+
+    return null;
+  }
 </script>
 
-<Router {routes} />
+{#if !hydrated}
+  <!-- Pre-hydration: render nothing visible. The user sees a flash
+       of empty white for ~50ms in the worst case; the alternative
+       (a "Loading…" placeholder) creates a more jarring layout shift
+       on a fast connection. -->
+  <div class="min-h-screen bg-white dark:bg-zinc-950"></div>
+{:else if hydrateError}
+  <div class="flex items-center justify-center min-h-screen px-4">
+    <div class="max-w-sm text-center space-y-2">
+      <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        Connection problem
+      </h1>
+      <p class="text-sm text-gray-500 dark:text-gray-400">
+        {hydrateError}
+      </p>
+    </div>
+  </div>
+{:else}
+  <Router {routes} />
+{/if}
