@@ -1,5 +1,7 @@
 <script lang="ts">
   import { addApp } from '../lib/api';
+  import { APP_STORE_COUNTRIES } from '../lib/countries';
+  import CountrySingleCombobox from './CountrySingleCombobox.svelte';
 
   interface Props {
     onClose: () => void;
@@ -8,6 +10,9 @@
   let { onClose, onAdded }: Props = $props();
 
   let appStoreId = $state('');
+  // Default to US for parity with the server's historical default. Users
+  // whose apps aren't on the US storefront override this before submitting.
+  let lookupCountry = $state('us');
   let busy = $state(false);
   let error = $state<string | null>(null);
 
@@ -21,7 +26,7 @@
     busy = true;
     error = null;
     try {
-      await addApp(id);
+      await addApp(id, lookupCountry);
       onAdded();
       onClose();
     } catch (err) {
@@ -63,10 +68,19 @@
           bind:value={appStoreId}
           class="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:border-zinc-500 focus:outline-none"
         />
-        <span class="text-xs text-zinc-500">
-          App will be tracked in every country where a keyword exists. Name + icon are pulled from the US storefront.
-        </span>
       </label>
+
+      <div class="block space-y-1">
+        <span class="text-xs uppercase tracking-wide text-zinc-500">Primary storefront</span>
+        <CountrySingleCombobox
+          options={APP_STORE_COUNTRIES}
+          selected={lookupCountry}
+          onChange={(c) => (lookupCountry = c)}
+        />
+        <span class="text-xs text-zinc-500">
+          Name + icon are pulled from this storefront. The app is still tracked in every country where you add a keyword.
+        </span>
+      </div>
 
       {#if error}
         <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
