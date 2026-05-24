@@ -158,18 +158,18 @@
   }
 </script>
 
-<div class="min-h-screen bg-zinc-950 text-zinc-100">
-  <header class="relative z-30 border-b border-zinc-800 bg-zinc-950/80 px-6 py-3 backdrop-blur">
+<div class="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+  <header class="relative z-30 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 px-6 py-3 backdrop-blur">
     <div class="flex items-center gap-3">
       <h1 class="text-base font-semibold tracking-tight">Keywordista</h1>
       <AppSwitcher onAddNew={() => (showAddApp = true)} />
 
       {#if $currentAppId}
         <div class="ml-2 flex items-center gap-4 text-sm">
-          <span><span class="text-zinc-500">Tracked</span> <span class="text-zinc-100">{summary().total}</span></span>
-          <span><span class="text-zinc-500">Ranked</span> <span class="text-zinc-100">{summary().ranked}</span></span>
-          <span><span class="text-zinc-500">Top 10</span> <span class="text-emerald-400">{summary().top10}</span></span>
-          <span><span class="text-zinc-500">Top 50</span> <span class="text-amber-400">{summary().top50}</span></span>
+          <span><span class="text-zinc-500">Tracked</span> <span class="text-zinc-900 dark:text-zinc-100">{summary().total}</span></span>
+          <span><span class="text-zinc-500">Ranked</span> <span class="text-zinc-900 dark:text-zinc-100">{summary().ranked}</span></span>
+          <span><span class="text-zinc-500">Top 10</span> <span class="text-emerald-600 dark:text-emerald-400">{summary().top10}</span></span>
+          <span><span class="text-zinc-500">Top 50</span> <span class="text-amber-600 dark:text-amber-400">{summary().top50}</span></span>
           <span class="text-zinc-500">·</span>
           <span class="text-zinc-500">{visibleRows} of {scopedTotal} shown</span>
         </div>
@@ -178,22 +178,22 @@
       <div class="ml-auto flex items-center gap-2">
         <button
           onclick={() => (showAddKeyword = true)}
-          class="rounded-md bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-950 hover:bg-white"
+          class="rounded-md bg-zinc-900 dark:bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-50 dark:text-zinc-950 hover:bg-black dark:hover:bg-white"
         >
           + Keyword
         </button>
         {#if refreshAllActive}
           <div
-            class="flex w-44 flex-col gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1"
+            class="flex w-44 flex-col gap-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1"
             title="Refreshing keywords in the background"
           >
-            <div class="flex items-baseline justify-between text-xs text-zinc-300">
+            <div class="flex items-baseline justify-between text-xs text-zinc-700 dark:text-zinc-300">
               <span>Refreshing</span>
-              <span class="font-mono text-zinc-100"
+              <span class="font-mono text-zinc-900 dark:text-zinc-100"
                 >{refreshAllDone}/{refreshAllTotal}</span
               >
             </div>
-            <div class="h-1 overflow-hidden rounded-full bg-zinc-800">
+            <div class="h-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
               <div
                 class="h-full bg-amber-400 transition-[width] duration-500"
                 style="width: {refreshAllProgress * 100}%"
@@ -203,7 +203,7 @@
         {:else}
           <button
             onclick={onRefreshAll}
-            class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1 text-sm text-zinc-100 hover:bg-zinc-800"
+            class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             Refresh all
           </button>
@@ -212,7 +212,7 @@
           onclick={() => (showCharts = true)}
           title="Chart positions"
           aria-label="Charts"
-          class="relative rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1 text-sm text-zinc-100 hover:bg-zinc-800"
+          class="relative rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         >
           Charts
           {#if chartsUnreadCount > 0}
@@ -228,7 +228,7 @@
           onclick={() => (showSettings = true)}
           title="Settings"
           aria-label="Settings"
-          class="rounded-md border border-zinc-700 bg-zinc-900 p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 p-1.5 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
         >
           <svg
             width="16"
@@ -256,30 +256,30 @@
     {#if loading}
       <p class="text-sm text-zinc-500">Loading…</p>
     {:else if error}
-      <p class="text-sm text-red-400">{error}</p>
+      <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
     {:else if $apps.length === 0}
-      <div class="rounded-lg border border-dashed border-zinc-800 p-12 text-center">
-        <p class="text-zinc-300">No watched apps yet.</p>
+      <div class="rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800 p-12 text-center">
+        <p class="text-zinc-700 dark:text-zinc-300">No watched apps yet.</p>
         <p class="mt-1 text-sm text-zinc-500">
-          Open the app switcher (top-left) and click <span class="text-amber-400">+ Add an app</span> to get started.
+          Open the app switcher (top-left) and click <span class="text-amber-600 dark:text-amber-400">+ Add an app</span> to get started.
         </p>
       </div>
     {:else if scopedTotal === 0}
-      <div class="rounded-lg border border-dashed border-zinc-800 p-12 text-center">
-        <p class="text-zinc-300">No keywords tracked yet.</p>
+      <div class="rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800 p-12 text-center">
+        <p class="text-zinc-700 dark:text-zinc-300">No keywords tracked yet.</p>
         <p class="mt-1 text-sm text-zinc-500">
-          Click <span class="text-zinc-300">+ Keyword</span> above to add one.
+          Click <span class="text-zinc-700 dark:text-zinc-300">+ Keyword</span> above to add one.
         </p>
       </div>
     {:else if visibleRows === 0}
-      <div class="rounded-lg border border-dashed border-zinc-800 p-12 text-center">
-        <p class="text-zinc-300">No rows match the current filters.</p>
+      <div class="rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800 p-12 text-center">
+        <p class="text-zinc-700 dark:text-zinc-300">No rows match the current filters.</p>
         <p class="mt-1 text-sm text-zinc-500">Clear filters to see all {scopedTotal} rows.</p>
       </div>
     {:else}
-      <div class="overflow-auto rounded-lg border border-zinc-800">
+      <div class="overflow-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
         <table class="w-full text-sm">
-          <thead class="bg-zinc-900">
+          <thead class="bg-zinc-50 dark:bg-zinc-900">
             <tr>
               <SortableHeader column="term" label="Keyword" />
               <SortableHeader column="country" label="Country" />

@@ -18,9 +18,9 @@
   };
 </script>
 
-<div class="flex items-center gap-3 border-b border-zinc-900 px-1 py-2 text-sm">
+<div class="flex items-center gap-3 border-b border-zinc-100 dark:border-zinc-900 px-1 py-2 text-sm">
   <span class="text-base">{ICON[event.kind]}</span>
-  <span class="flex-1 text-zinc-200">
+  <span class="flex-1 text-zinc-800 dark:text-zinc-200">
     <span class="font-medium">{event.appName}</span>
     {#if event.kind === 'entered'}
       entered <span title={appStoreCountryName(event.country)}>{isoCountryToFlag(event.country)} {event.country.toUpperCase()}</span> at <span class="font-medium">#{event.position}</span>

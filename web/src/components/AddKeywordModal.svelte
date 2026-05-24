@@ -95,12 +95,12 @@
     role="dialog"
     aria-modal="true"
     aria-labelledby="add-keyword-title"
-    class="relative w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6"
+    class="relative w-full max-w-md rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-6"
   >
   <form onsubmit={submit} class="space-y-4">
     <header class="flex items-baseline justify-between">
-      <h2 id="add-keyword-title" class="text-base font-semibold text-zinc-100">Track a new keyword</h2>
-      <button type="button" onclick={onClose} class="text-sm text-zinc-500 hover:text-zinc-300"
+      <h2 id="add-keyword-title" class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Track a new keyword</h2>
+      <button type="button" onclick={onClose} class="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
         >Cancel</button
       >
     </header>
@@ -111,7 +111,7 @@
         type="text"
         placeholder="e.g. flashcards"
         bind:value={term}
-        class="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+        class="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:border-zinc-500 focus:outline-none"
       />
     </label>
 
@@ -122,7 +122,7 @@
           <button
             type="button"
             onclick={() => (countries = [])}
-            class="text-xs text-zinc-500 hover:text-zinc-200"
+            class="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
           >
             Clear
           </button>
@@ -136,13 +136,13 @@
     </div>
 
     {#if error}
-      <p class="text-sm text-red-400">{error}</p>
+      <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
     {/if}
 
     <button
       type="submit"
       disabled={busy}
-      class="w-full rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-950 hover:bg-white disabled:opacity-50"
+      class="w-full rounded-md bg-zinc-900 dark:bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-50 dark:text-zinc-950 hover:bg-black dark:hover:bg-white disabled:opacity-50"
     >
       {#if busy && progress}
         Adding {progress.done}/{progress.total}…

@@ -43,14 +43,14 @@
   const genre = $derived(GENRE_NAMES[pos.genreId] ?? `Category #${pos.genreId}`);
 </script>
 
-<div class="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+<div class="rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3">
   <div class="flex items-baseline justify-between text-sm">
-    <span class="font-medium text-zinc-100">{pos.appName}</span>
+    <span class="font-medium text-zinc-900 dark:text-zinc-100">{pos.appName}</span>
     <span class="text-xs text-zinc-500" title={appStoreCountryName(pos.country)}>
       {isoCountryToFlag(pos.country)} {pos.country.toUpperCase()}
     </span>
   </div>
-  <div class="my-1 text-2xl font-semibold text-amber-400">#{pos.position}</div>
+  <div class="my-1 text-2xl font-semibold text-amber-600 dark:text-amber-400">#{pos.position}</div>
   <div class="text-xs text-zinc-500">{genre} · {pos.chartType}</div>
-  <div class="mt-1 text-[11px] text-zinc-600">Seen {timeAgo(pos.observedAt)}</div>
+  <div class="mt-1 text-[11px] text-zinc-400 dark:text-zinc-600">Seen {timeAgo(pos.observedAt)}</div>
 </div>

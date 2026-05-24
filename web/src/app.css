@@ -8,18 +8,29 @@
   font-feature-settings: 'tnum';
 }
 
-/* Subtle scrollbar that reads on dark backgrounds. */
+/* Subtle scrollbar — light scheme by default, dark when html.dark is set.
+   Scoped to html.dark (rather than @media prefers-color-scheme) so it
+   follows the user's explicit theme picker, not just the OS. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: rgb(24 24 27); /* zinc-900 */
+  background: rgb(244 244 245); /* zinc-100 */
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(63 63 70); /* zinc-700 */
+  background: rgb(212 212 216); /* zinc-300 */
   border-radius: 5px;
 }
 ::-webkit-scrollbar-thumb:hover {
+  background: rgb(161 161 170); /* zinc-400 */
+}
+html.dark ::-webkit-scrollbar-track {
+  background: rgb(24 24 27); /* zinc-900 */
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgb(63 63 70); /* zinc-700 */
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
   background: rgb(82 82 91); /* zinc-600 */
 }

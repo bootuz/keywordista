@@ -24,9 +24,9 @@
 
   function rankColor(r: number | null): string {
     if (r == null) return 'text-zinc-500';
-    if (r <= 10) return 'text-emerald-400';
-    if (r <= 50) return 'text-amber-400';
-    return 'text-red-400';
+    if (r <= 10) return 'text-emerald-600 dark:text-emerald-400';
+    if (r <= 50) return 'text-amber-600 dark:text-amber-400';
+    return 'text-red-600 dark:text-red-400';
   }
 
   async function onRefresh() {
@@ -52,10 +52,10 @@
   }
 </script>
 
-<tr class="border-t border-zinc-800 hover:bg-zinc-900/60">
+<tr class="border-t border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900/60">
   <td class="px-3 py-2">
     <button
-      class="text-left text-sm font-medium text-zinc-100 hover:text-amber-300"
+      class="text-left text-sm font-medium text-zinc-900 dark:text-zinc-100 hover:text-amber-700 dark:hover:text-amber-300"
       onclick={onOpenHistory}
     >
       {row.term}
@@ -84,7 +84,7 @@
   <td class="px-3 py-2"><DotsIndicator score={row.entryBarrier} /></td>
   <td class="px-3 py-2 text-sm text-zinc-500">
     {#if isRefreshing}
-      <span class="text-amber-400">Checking…</span>
+      <span class="text-amber-600 dark:text-amber-400">Checking…</span>
     {:else}
       {timeAgo(row.checkedAt)}
     {/if}
@@ -95,7 +95,7 @@
         title="Refresh"
         onclick={onRefresh}
         disabled={isRefreshing}
-        class="rounded p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+        class="rounded p-1.5 text-zinc-600 dark:text-zinc-400 transition hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 disabled:opacity-50"
       >
         <svg
           class={isRefreshing ? 'animate-spin' : ''}
@@ -117,7 +117,7 @@
       <button
         title="Delete"
         onclick={onDelete}
-        class="rounded p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-red-300"
+        class="rounded p-1.5 text-zinc-600 dark:text-zinc-400 transition hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-red-700 dark:hover:text-red-300"
       >
         <svg
           width="14"

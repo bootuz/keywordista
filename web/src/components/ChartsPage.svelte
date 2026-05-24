@@ -97,12 +97,12 @@
   }
 </script>
 
-<div class="fixed inset-0 z-40 flex flex-col bg-zinc-950 text-zinc-100">
+<div class="fixed inset-0 z-40 flex flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
   <!-- Header — matches the dashboard's chrome so the chart page feels like
        a peer surface rather than a modal. -->
-  <header class="flex items-center gap-3 border-b border-zinc-800 px-6 py-3">
+  <header class="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-6 py-3">
     <h1 class="text-base font-semibold tracking-tight">Keywordista</h1>
-    <span class="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
+    <span class="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
       Charts
     </span>
     <div class="ml-auto flex items-center gap-2">
@@ -110,7 +110,7 @@
         type="button"
         disabled={refreshing}
         onclick={onCheckNow}
-        class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1 text-sm text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
+        class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
       >
         {refreshing ? 'Checking…' : 'Check now ↻'}
       </button>
@@ -119,14 +119,14 @@
         disabled={probing !== null}
         onclick={onReprobeAll}
         title="Re-detect which storefronts each watched app is published in"
-        class="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1 text-sm text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
+        class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
       >
         {probing ? 'Probing…' : 'Re-probe availability'}
       </button>
       <button
         type="button"
         onclick={onClose}
-        class="rounded-md bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-950 hover:bg-white"
+        class="rounded-md bg-zinc-900 dark:bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-50 dark:text-zinc-950 hover:bg-black dark:hover:bg-white"
       >
         Back to Keywords
       </button>
@@ -135,11 +135,11 @@
 
   <main class="flex-1 overflow-auto px-6 py-4">
     {#if showPermissionCTA}
-      <div class="mb-4 flex items-center gap-3 rounded-md border border-blue-900 bg-blue-950/30 p-3 text-sm text-blue-100">
+      <div class="mb-4 flex items-center gap-3 rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-3 text-sm text-blue-900 dark:text-blue-100">
         <span class="text-lg">🔔</span>
         <span class="flex-1">
           <b>Get notified when your apps chart.</b><br />
-          <span class="text-blue-200/80">We'll fire a browser notification when one of your watched apps enters, moves in, or exits a top-100 chart in any storefront where it's available.</span>
+          <span class="text-blue-700/80 dark:text-blue-200/80">We'll fire a browser notification when one of your watched apps enters, moves in, or exits a top-100 chart in any storefront where it's available.</span>
         </span>
         <div class="flex gap-2">
           <button
@@ -152,14 +152,14 @@
           <button
             type="button"
             onclick={onLater}
-            class="rounded-md px-2 py-1 text-xs text-blue-200/80 hover:text-blue-100"
+            class="rounded-md px-2 py-1 text-xs text-blue-700/80 hover:text-blue-900 dark:text-blue-200/80 dark:hover:text-blue-100"
           >
             Later
           </button>
         </div>
       </div>
     {:else if permission === 'denied'}
-      <div class="mb-4 rounded-md border border-amber-900 bg-amber-950/30 p-3 text-sm text-amber-100">
+      <div class="mb-4 rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-100">
         Browser notifications are blocked. Re-enable them in your browser's site settings, then reload this page.
       </div>
     {/if}
@@ -167,22 +167,22 @@
     {#if loading}
       <p class="text-sm text-zinc-500">Loading…</p>
     {:else if error}
-      <p class="text-sm text-red-400">{error}</p>
+      <p class="text-sm text-red-600 dark:text-red-400">{error}</p>
     {:else}
       <!-- Currently charted -->
       <section class="mb-6">
         <h2 class="mb-2 text-xs uppercase tracking-wide text-zinc-500">
           Currently charted
           {#if positions.length > 0}
-            <span class="ml-2 text-zinc-600 normal-case tracking-normal">
+            <span class="ml-2 text-zinc-400 dark:text-zinc-600 normal-case tracking-normal">
               {positions.length} {positions.length === 1 ? 'position' : 'positions'}
             </span>
           {/if}
         </h2>
         {#if positions.length === 0}
-          <div class="rounded-md border border-dashed border-zinc-800 p-10 text-center text-sm">
+          <div class="rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 p-10 text-center text-sm">
             <div class="text-2xl opacity-40">📈</div>
-            <div class="mt-2 font-medium text-zinc-300">Nothing charted right now</div>
+            <div class="mt-2 font-medium text-zinc-700 dark:text-zinc-300">Nothing charted right now</div>
             <div class="mt-1 text-zinc-500">
               Watching {$apps.length} {$apps.length === 1 ? 'app' : 'apps'} across every storefront they ship in.
               Events show up here the moment something crosses into the top-100.
@@ -203,7 +203,7 @@
         {#if $chartEvents.length === 0}
           <p class="text-sm text-zinc-500">No chart events yet. They'll appear here as soon as something moves.</p>
         {:else}
-          <div class="rounded-md border border-zinc-800 bg-zinc-900/30">
+          <div class="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30">
             {#each $chartEvents as ev (ev.id)}
               <ChartActivityRow event={ev} />
             {/each}

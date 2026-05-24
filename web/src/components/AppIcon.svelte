@@ -14,12 +14,12 @@
     width={size}
     height={size}
     loading="lazy"
-    class="rounded-md ring-1 ring-zinc-800"
+    class="rounded-md ring-1 ring-zinc-200 dark:ring-zinc-800"
     style="width: {size}px; height: {size}px;"
   />
 {:else}
   <div
-    class="rounded-md bg-zinc-800 ring-1 ring-zinc-700"
+    class="rounded-md bg-zinc-100 ring-1 ring-zinc-300 dark:bg-zinc-800 dark:ring-zinc-700"
     style="width: {size}px; height: {size}px;"
   ></div>
 {/if}
