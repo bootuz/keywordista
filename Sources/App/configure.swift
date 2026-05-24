@@ -109,6 +109,12 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateAppStorefrontAvailability())
     app.migrations.add(CreateChartPositionSnapshot())
     app.migrations.add(CreateChartEvent())
+    // M1 — auth + multi-user tables. Safe to register in both modes:
+    // local-mode boots will create the tables but never insert into
+    // them (auth middleware is server-only). Keeps the migration set
+    // identical across local + server so a `local` install can be
+    // upgraded to `server` later without manual SQL.
+    app.migrations.add(CreateUsers())
 
     try await app.autoMigrate()
 
