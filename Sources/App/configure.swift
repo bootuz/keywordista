@@ -98,6 +98,19 @@ public func configure(_ app: Application) async throws {
     try database.register(on: app)
     try await database.applyDriverSpecificTuning(on: app)
 
+    // Encryption-at-rest (M1.9). Resolve the runtime SecretBox once
+    // here so the M1.9 migration AND every per-request SettingsService
+    // construction share the same key. In local mode the key derives
+    // from IOPlatformUUID (deterministic across boots on the same
+    // Mac); in server mode it comes from KEYWORDISTA_ENCRYPTION_KEY
+    // (manifest already validated required-in-server-mode).
+    let encryptionKey = try EncryptionKeyResolver.resolve(
+        mode: manifest.mode,
+        explicit: try manifest.optional(EnvVars.encryptionKey)
+    )
+    let secretBox = SecretBox(key: encryptionKey)
+    app.secretBox = secretBox
+
     app.migrations.add(CreateWatchedApp())
     app.migrations.add(CreateKeyword())
     app.migrations.add(CreateRankCheck())
@@ -121,6 +134,10 @@ public func configure(_ app: Application) async throws {
     // CreateUsers because they reference users(id).
     app.migrations.add(AddCreatorUserIdToWatchedApp())
     app.migrations.add(AddCreatorUserIdToKeyword())
+    // M1.9 — Encrypt-at-rest data migration. Constructor takes the
+    // runtime SecretBox so prepare/revert see the same crypto state
+    // as production reads/writes. Idempotent on both directions.
+    app.migrations.add(EncryptExistingSecrets(secretBox: secretBox))
 
     try await app.autoMigrate()
 

@@ -33,7 +33,12 @@ extension Request {
     }
 
     func settingsService() -> any SettingsServiceProtocol {
-        SettingsService(repository: FluentSettingsRepository(db: db))
+        // requireSecretBox fatalErrors if configure.swift didn't set
+        // it — by the time a request reaches here, that's an invariant.
+        SettingsService(
+            repository: FluentSettingsRepository(db: db),
+            secretBox: application.requireSecretBox()
+        )
     }
 
     func developerKeywordsService() -> any DeveloperKeywordsServiceProtocol {
