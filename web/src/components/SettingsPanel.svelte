@@ -463,8 +463,16 @@
         <div id="asa-section-body" class="mt-3" transition:slide={{ duration: 200 }}>
       <p class="mb-3 text-xs text-zinc-500">
         Used for keyword suggestions for any app. Create a Search Ads account at
-        <code class="rounded bg-zinc-100 dark:bg-zinc-800 px-1 text-zinc-700 dark:text-zinc-300">searchads.apple.com</code> (free, no
-        budget required), then Settings → API → Create New Client.
+        <code class="rounded bg-zinc-800 px-1 text-zinc-300">searchads.apple.com</code>. See Apple's
+        <a
+          href="https://developer.apple.com/documentation/apple_ads/implementing-oauth-for-the-apple-search-ads-api"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-amber-400 hover:underline"
+        >
+          OAuth setup guide&nbsp;↗
+        </a>
+        for the Client ID / Client Secret details.
       </p>
 
       <form onsubmit={saveASA} class="space-y-3">
