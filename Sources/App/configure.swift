@@ -117,6 +117,10 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateUsers())
     app.migrations.add(CreateAuthSessions())
     app.migrations.add(CreateInvites())
+    // ADD COLUMN migrations on existing tables — must run AFTER
+    // CreateUsers because they reference users(id).
+    app.migrations.add(AddCreatorUserIdToWatchedApp())
+    app.migrations.add(AddCreatorUserIdToKeyword())
 
     try await app.autoMigrate()
 

@@ -16,6 +16,14 @@ final class WatchedApp: Model, Content, @unchecked Sendable {
     @OptionalField(key: "primary_genre_id") var primaryGenreId: Int?
     @Timestamp(key: "added_at", on: .create) var addedAt: Date?
 
+    /// Auth attribution (M1.8): the user who added this app. Nullable
+    /// because (a) pre-auth rows have no creator (= "system / pre-auth
+    /// era"), and (b) local mode never has users so the column stays
+    /// NULL there. FK ON DELETE SET NULL preserves the WatchedApp row
+    /// when its creator is later deleted — losing audit fidelity, not
+    /// losing the user's data.
+    @OptionalParent(key: "creator_user_id") var creator: User?
+
     init() {}
 
     init(
@@ -24,7 +32,8 @@ final class WatchedApp: Model, Content, @unchecked Sendable {
         bundleId: String,
         name: String,
         iconURL: String?,
-        primaryGenreId: Int? = nil
+        primaryGenreId: Int? = nil,
+        creatorID: UUID? = nil
     ) {
         self.id = id
         self.appStoreId = appStoreId
@@ -32,6 +41,7 @@ final class WatchedApp: Model, Content, @unchecked Sendable {
         self.name = name
         self.iconURL = iconURL
         self.primaryGenreId = primaryGenreId
+        self.$creator.id = creatorID
     }
 }
 
@@ -67,6 +77,33 @@ struct AddPrimaryGenreIdToWatchedApp: AsyncMigration {
     func revert(on database: Database) async throws {
         try await database.schema(WatchedApp.schema)
             .deleteField("primary_genre_id")
+            .update()
+    }
+}
+
+// M1.8 — Auth attribution. Nullable + FK ON DELETE SET NULL so:
+//   • Existing pre-auth rows migrate to NULL ("system" / pre-auth era).
+//   • Deleting the creating user later preserves the WatchedApp row
+//     (the team still wants to track the app) but loses the audit
+//     pointer. The Invite model uses the same SET NULL semantics for
+//     consumed_by — same intent, same cascade.
+//
+// MUST run AFTER CreateUsers (FK target must exist); configure.swift
+// registers in that order.
+struct AddCreatorUserIdToWatchedApp: AsyncMigration {
+    func prepare(on database: Database) async throws {
+        try await database.schema(WatchedApp.schema)
+            .field(
+                "creator_user_id",
+                .uuid,
+                .references(User.schema, "id", onDelete: .setNull)
+            )
+            .update()
+    }
+
+    func revert(on database: Database) async throws {
+        try await database.schema(WatchedApp.schema)
+            .deleteField("creator_user_id")
             .update()
     }
 }
