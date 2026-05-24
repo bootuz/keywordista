@@ -115,8 +115,19 @@ public func configure(_ app: Application) async throws {
     // identical across local + server so a `local` install can be
     // upgraded to `server` later without manual SQL.
     app.migrations.add(CreateUsers())
+    app.migrations.add(CreateAuthSessions())
 
     try await app.autoMigrate()
+
+    // Boot-time auth-session sweep: DELETE rows whose expiresAt has
+    // already passed. In local mode this is a no-op (no sessions
+    // ever created); in server mode it keeps the table from growing
+    // unbounded with abandoned sessions from forgotten devices.
+    // Logged at info level for ops visibility on real deployments.
+    let purged = try await AuthSession.purgeExpired(on: app.db)
+    if purged > 0 {
+        app.logger.info("purged \(purged) expired auth session(s) at boot")
+    }
 
     // Orphan-job sweeper: any job left in 'processing' state at boot is
     // by definition stranded — the worker that picked it up is gone
