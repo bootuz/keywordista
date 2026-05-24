@@ -1,0 +1,38 @@
+# Ingress for Keywordista. Optional — use this if your cluster runs
+# an Ingress controller (nginx, traefik, cert-manager + Let's Encrypt).
+# Skip if you're port-forwarding for dev or using a LoadBalancer Service.
+#
+# This assumes nginx-ingress + cert-manager with a ClusterIssuer named
+# `letsencrypt-prod`. Adjust the annotations for your stack.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keywordista
+  labels:
+    app.kubernetes.io/name: keywordista
+  annotations:
+    # cert-manager: auto-fetch a Let's Encrypt cert for the host below.
+    # Delete this annotation block if you're terminating TLS at an LB
+    # in front of the cluster instead.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Reasonable defaults for a tracker-style app. Bump body size if
+    # operators paste large .p8 keys (~2 KB is typical, so 1MB is fine).
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - keywordista.your-domain.com   # ← replace with your host
+      secretName: keywordista-tls
+  rules:
+    - host: keywordista.your-domain.com   # ← same as above
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keywordista
+                port:
+                  number: 80

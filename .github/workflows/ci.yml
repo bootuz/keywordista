@@ -29,6 +29,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  env-manifest:
+    name: Env-var contract guard
+    # Pure bash + grep — Ubuntu is faster and cheaper than macOS for this.
+    # Runs in parallel with the heavier build jobs so it fans out signal
+    # early: a PR that drifts the env-var contract sees the failure within
+    # 30 seconds, not after waiting for the full Swift build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run env-manifest guard
+        run: ./scripts/check-env-manifest.sh
+
   server:
     name: Vapor server (swift build + test)
     # macos-15 ships Xcode 16+ (with Swift Testing bundled and Swift 6
@@ -120,3 +132,97 @@ jobs:
         # via build-app.sh is intentionally a release-time concern; CI just
         # proves the Swift compiles + links.
         run: swift build
+
+  image-size:
+    name: Server image (build + size gate)
+    # Builds the Dockerfile on every PR — same as release-image.yml does,
+    # but amd64 only (no QEMU arm64 emulation; release-image.yml owns
+    # multi-arch) and not pushed anywhere. Catches Dockerfile breakage
+    # and image-bloat regressions before they hit a real release.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # GHA layer cache means re-runs on this branch are seconds, not
+      # minutes. The first run after Dockerfile changes invalidates
+      # caches for affected layers only.
+      - name: Build server image (amd64, local load)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: keywordista:ci
+          build-args: |
+            KEYWORDISTA_BUILD_VERSION=ci-${{ github.sha }}
+            KEYWORDISTA_BUILD_COMMIT_SHA=${{ github.sha }}
+            KEYWORDISTA_BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Hard ceiling: 450 MB. The original plan §4.6.1 said <150 MB —
+      # that turns out to be arm64-only reality (swift:6.1-jammy-slim
+      # on arm64 is ~120 MB; on amd64 it's ~300+ MB). This CI job
+      # measures the amd64 build, which is the worst-case platform.
+      # Current sizes (with dynamic Swift stdlib, swift:6.1-jammy-slim):
+      #   arm64 (local):  ~130 MB
+      #   amd64 (CI):     ~360 MB (rough; refined as more builds land)
+      # Real shrink path is M6 polish: distroless/cc + manual Swift
+      # runtime lib bundling can probably land both arches under
+      # 100 MB. Not M0 work.
+      #
+      # The gate still has value: a ceiling 25% above current amd64
+      # blocks "we shipped Foundation twice by accident"-style
+      # regressions while not blocking on inherent base-image size.
+      - name: Enforce image-size ceiling (450 MB, amd64 worst-case)
+        run: |
+          set -euo pipefail
+          BYTES=$(docker image inspect keywordista:ci --format '{{.Size}}')
+          MB=$(( BYTES / 1024 / 1024 ))
+          CEILING=450
+          echo "→ keywordista:ci is ${MB} MB (ceiling: ${CEILING} MB)"
+          if (( MB > CEILING )); then
+            echo "✘ image grew past the ${CEILING} MB ceiling."
+            echo "  If the growth is intentional, raise the ceiling in"
+            echo "  .github/workflows/ci.yml and document the reason."
+            exit 1
+          fi
+          # Surface the size on the GHA run summary so trends are
+          # visible in the Actions tab over time.
+          {
+            echo "## Image size"
+            echo ""
+            echo "**${MB} MB** / ${CEILING} MB ceiling (amd64)"
+            echo ""
+            echo "_M6 polish opportunity: distroless/cc + manual Swift"
+            echo "runtime lib bundling can plausibly cut this by 60%+._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # End-to-end boot smoke: a sealed image that doesn't actually run
+      # is useless. Same shape as `make docker-smoke` locally.
+      - name: Smoke test (boot + /health)
+        run: |
+          set -euo pipefail
+          docker run -d --name kw-smoke \
+            -p 8080:8080 \
+            -e KEYWORDISTA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
+            -e KEYWORDISTA_PUBLIC_BASE_URL=http://localhost:8080 \
+            keywordista:ci
+          # Wait up to 30s for /health to become 200.
+          for i in $(seq 1 15); do
+            if curl -fsS http://localhost:8080/health > /dev/null 2>&1; then
+              echo "✓ /health is green after ${i}×2s"
+              docker stop kw-smoke > /dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "✘ /health didn't respond within 30s"
+          docker logs kw-smoke
+          docker stop kw-smoke > /dev/null
+          exit 1

@@ -1,0 +1,63 @@
+# Build context for the Keywordista Docker image. The Dockerfile only
+# ever needs source — never build artifacts, never the existing macOS app
+# bundle, never Xcode noise. Excluding these keeps `docker build` cold-
+# start small (faster on every dev box, faster on CI) and prevents stale
+# bytes from a previous `swift build` accidentally ending up inside the
+# image.
+
+# Swift / SPM artifacts (but NOT Package.resolved — when CI runs
+# `swift package resolve` before the docker build, the resulting
+# lockfile pins exact dependency versions for a reproducible image.
+# Locally it's gitignored; the Dockerfile's `COPY Package.resolved*`
+# glob handles either presence cleanly.)
+.build/
+.swiftpm/
+
+# Node artifacts — Docker rebuilds the SPA in its own builder stage.
+web/node_modules/
+web/dist/
+
+# Built SPA — Docker rebuilds it from web/ via the spa-builder stage.
+# (Including this would risk shipping a stale Public/ from a local
+# `npm run build` instead of the one matching the source we're shipping.)
+Public/
+
+# macOS app build outputs
+mac/.build/
+mac/Keywordista.app/
+releases/
+
+# Git, IDE, OS noise
+.git/
+.github/
+.vscode/
+.idea/
+.DS_Store
+*.xcuserstate
+
+# Docs / examples / human-only files — never reach the runtime image.
+README.md
+CONTRIBUTING.md
+LICENSE
+docs/
+*.md
+*.html
+
+# NOTE: Tests/ is NOT excluded here. Package.swift declares
+# `.testTarget(name: "AppTests", path: "Tests/AppTests")`, so SPM
+# expects the directory to exist when it loads the manifest in the
+# swift-builder stage. The test target is never *built* in the runtime
+# image (the runtime stage only COPYs the App binary + Public assets),
+# so this is a few KB of build-context cost and zero runtime-image cost.
+
+# Local env / secrets — must NEVER end up in build context.
+.env
+.env.*
+*.p8
+*.key
+
+# Misc
+*.log
+.remember/
+.superpowers/
+.claude/
