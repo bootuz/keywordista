@@ -7,6 +7,30 @@ import SQLKit
 import Vapor
 
 public func configure(_ app: Application) async throws {
+    // ── Env-var contract ──────────────────────────────────────────────
+    //
+    // Resolve and validate the §4.6.3 env-var contract once at boot,
+    // BEFORE any other init. Missing-required-var failures surface here
+    // with a clear "KEYWORDISTA_X is required in server mode" message —
+    // far less confusing than discovering halfway through migration
+    // setup that ENCRYPTION_KEY is missing. See Sources/App/Config/
+    // EnvVarManifest.swift for the typed accessors.
+    let manifest = try Manifest.bootstrap()
+
+    // ── Default bind address & port ───────────────────────────────────
+    //
+    // Server mode → 0.0.0.0 (public PaaS deploy: container needs to
+    // accept connections from the provider's load balancer);
+    // local mode → 127.0.0.1 (Mac menubar spawn: only the local
+    // browser talks to it).
+    //
+    // The menubar app's ServiceSupervisor still passes the explicit
+    // `--hostname 127.0.0.1 --port <chosen>` CLI flags. Vapor's CLI
+    // flags override these defaults if both are set, so behavior for
+    // the existing menubar path is unchanged.
+    app.http.server.configuration.hostname = try manifest.require(EnvVars.hostname)
+    app.http.server.configuration.port = try manifest.require(EnvVars.port)
+
     // ── JSON date precision ────────────────────────────────────────────
     //
     // Vapor's default .iso8601 strategy emits dates with whole-second
@@ -56,7 +80,7 @@ public func configure(_ app: Application) async throws {
     // When unset (dev / source builds), fall back to Vapor's convention.
     // FileMiddleware wants a trailing slash; tolerate either form from the
     // env var.
-    let rawPublicDir = Environment.get("KEYWORDISTA_PUBLIC_DIR") ?? app.directory.publicDirectory
+    let rawPublicDir = try manifest.optional(EnvVars.publicDir) ?? app.directory.publicDirectory
     let publicDir = rawPublicDir.hasSuffix("/") ? rawPublicDir : rawPublicDir + "/"
 
     // Static files (Public/) — serves built SPA assets in production.
@@ -67,7 +91,11 @@ public func configure(_ app: Application) async throws {
     // client-side routes (refresh on /dashboard, /settings, etc.) keep working.
     app.middleware.use(SPAFallbackMiddleware(indexPath: publicDir + "index.html"))
 
-    let dbPath = Environment.get("DATABASE_PATH") ?? "db.sqlite"
+    // Database path. M0.4 keeps SQLite-only; M0.5 introduces the
+    // DATABASE_URL → Postgres routing via DatabaseProvider abstraction.
+    // Defaults are mode-conditional (see manifest entry): `db.sqlite`
+    // cwd-relative in local mode, `/data/db.sqlite` in server mode.
+    let dbPath = try manifest.require(EnvVars.databasePath)
     app.databases.use(.sqlite(.file(dbPath)), as: .sqlite)
 
     // SQLite tuning. Two changes that together eliminate the "database is

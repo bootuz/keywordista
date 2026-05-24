@@ -35,15 +35,22 @@ ALLOWED_MANIFEST='Sources/App/Config/EnvVarManifest.swift'
 # Files that still call Environment.get directly because their migration
 # hasn't landed yet. Removing entries is part of the milestone listed in
 # the trailing comment.
-TEMPORARY_EXCEPTIONS=(
-  'Sources/App/configure.swift'  # removed by M0.4 (RuntimeMode plumbing)
-)
+#
+# As of M0.4 this list is empty — the manifest is the only place that
+# reads env vars. Any future "I need to read an env var here directly"
+# should add the var to the manifest and read it via manifest.require/
+# .optional instead.
+TEMPORARY_EXCEPTIONS=()
 
 # Build the exclusion grep arg: skip the manifest itself + each temp file.
+# `${ARRAY[@]+...}` is the canonical guard against `set -u` complaining
+# about expanding an empty array.
 EXCLUDE_ARGS=("--exclude=${ALLOWED_MANIFEST##*/}")
-for f in "${TEMPORARY_EXCEPTIONS[@]}"; do
-  EXCLUDE_ARGS+=("--exclude=${f##*/}")
-done
+if [[ ${#TEMPORARY_EXCEPTIONS[@]} -gt 0 ]]; then
+  for f in "${TEMPORARY_EXCEPTIONS[@]}"; do
+    EXCLUDE_ARGS+=("--exclude=${f##*/}")
+  done
+fi
 
 # `|| true` because grep returns 1 when it finds nothing — that's our
 # happy path. We check the captured output explicitly below.
@@ -69,9 +76,11 @@ if [[ -n "$OFFENDERS" ]]; then
   echo ""
   echo "Allowed today (no further additions):"
   echo "  • $ALLOWED_MANIFEST  (the manifest itself)"
-  for f in "${TEMPORARY_EXCEPTIONS[@]}"; do
-    echo "  • $f  (temporary; see script header)"
-  done
+  if [[ ${#TEMPORARY_EXCEPTIONS[@]} -gt 0 ]]; then
+    for f in "${TEMPORARY_EXCEPTIONS[@]}"; do
+      echo "  • $f  (temporary; see script header)"
+    done
+  fi
   exit 1
 fi
 
@@ -80,12 +89,14 @@ fi
 # is fine, just worth a moment of attention).
 MANIFEST_READS=$(grep -c -E "$PATTERN" "$ALLOWED_MANIFEST" || echo 0)
 TEMP_TOTAL=0
-for f in "${TEMPORARY_EXCEPTIONS[@]}"; do
-  if [[ -f "$f" ]]; then
-    n=$(grep -c -E "$PATTERN" "$f" || echo 0)
-    TEMP_TOTAL=$((TEMP_TOTAL + n))
-  fi
-done
+if [[ ${#TEMPORARY_EXCEPTIONS[@]} -gt 0 ]]; then
+  for f in "${TEMPORARY_EXCEPTIONS[@]}"; do
+    if [[ -f "$f" ]]; then
+      n=$(grep -c -E "$PATTERN" "$f" || echo 0)
+      TEMP_TOTAL=$((TEMP_TOTAL + n))
+    fi
+  done
+fi
 
 echo "✓ env-var contract guard clean"
 echo "  manifest ($ALLOWED_MANIFEST): $MANIFEST_READS Environment.get call(s)"

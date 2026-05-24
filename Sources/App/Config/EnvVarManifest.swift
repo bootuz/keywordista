@@ -331,9 +331,19 @@ public enum EnvVars {
 
     public static let databasePath = EnvVar<String>(
         name: "DATABASE_PATH",
-        description: "SQLite file path. Ignored if DATABASE_URL is set. Defaults to ${KEYWORDISTA_DATA_DIR}/db.sqlite.",
-        defaults: { _ in nil },
-        defaultDescription: { _ in "${KEYWORDISTA_DATA_DIR}/db.sqlite" },
+        description: "SQLite file path. Ignored if DATABASE_URL is set. Defaults: `db.sqlite` (cwd-relative) in local mode for dev-friendly `swift run`; `/data/db.sqlite` in server mode to match the Docker image's VOLUME mount.",
+        defaults: { mode in
+            switch mode {
+            case .local: return "db.sqlite"
+            case .server: return "/data/db.sqlite"
+            }
+        },
+        defaultDescription: { mode in
+            switch mode {
+            case .local: return "db.sqlite"
+            case .server: return "/data/db.sqlite"
+            }
+        },
         parse: Parsers.identity
     )
 
