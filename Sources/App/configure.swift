@@ -1,5 +1,4 @@
 import Fluent
-import FluentSQLiteDriver
 import Foundation
 import Queues
 import QueuesFluentDriver
@@ -91,26 +90,13 @@ public func configure(_ app: Application) async throws {
     // client-side routes (refresh on /dashboard, /settings, etc.) keep working.
     app.middleware.use(SPAFallbackMiddleware(indexPath: publicDir + "index.html"))
 
-    // Database path. M0.4 keeps SQLite-only; M0.5 introduces the
-    // DATABASE_URL → Postgres routing via DatabaseProvider abstraction.
-    // Defaults are mode-conditional (see manifest entry): `db.sqlite`
-    // cwd-relative in local mode, `/data/db.sqlite` in server mode.
-    let dbPath = try manifest.require(EnvVars.databasePath)
-    app.databases.use(.sqlite(.file(dbPath)), as: .sqlite)
-
-    // SQLite tuning. Two changes that together eliminate the "database is
-    // locked" storm we hit with parallel jobs:
-    //   • WAL journal mode lets a writer and many readers run concurrently
-    //     without exclusive locks. The mode change is persistent in the
-    //     .db file header — runs once, sticks across restarts.
-    //   • busy_timeout asks SQLite to wait up to 5s for a contended lock to
-    //     clear instead of immediately returning SQLITE_BUSY. Combined with
-    //     serial queue workers (below), this is enough headroom for the
-    //     dashboard's reads to never collide with a writer.
-    if let sql = app.db as? any SQLDatabase {
-        try await sql.raw("PRAGMA journal_mode=WAL").run()
-        try await sql.raw("PRAGMA busy_timeout=5000").run()
-    }
+    // Database driver. Routes per §4.10: DATABASE_URL → Postgres,
+    // otherwise SQLite at DATABASE_PATH. Local mode (menubar-spawned)
+    // always resolves to SQLite. Driver-specific tuning (SQLite PRAGMAs)
+    // is encapsulated in DatabaseProvider and a no-op for Postgres.
+    let database = try DatabaseProvider.resolve(from: manifest)
+    try database.register(on: app)
+    try await database.applyDriverSpecificTuning(on: app)
 
     app.migrations.add(CreateWatchedApp())
     app.migrations.add(CreateKeyword())
