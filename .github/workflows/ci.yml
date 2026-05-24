@@ -29,6 +29,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  env-manifest:
+    name: Env-var contract guard
+    # Pure bash + grep — Ubuntu is faster and cheaper than macOS for this.
+    # Runs in parallel with the heavier build jobs so it fans out signal
+    # early: a PR that drifts the env-var contract sees the failure within
+    # 30 seconds, not after waiting for the full Swift build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run env-manifest guard
+        run: ./scripts/check-env-manifest.sh
+
   server:
     name: Vapor server (swift build + test)
     # macos-15 ships Xcode 16+ (with Swift Testing bundled and Swift 6
