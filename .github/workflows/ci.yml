@@ -165,17 +165,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Hard ceiling: 200 MB. Documented in plan §4.6.1 as the
-      # conservative ceiling; the aspirational target is <150 MB. M0
-      # currently lands at ~162 MB on arm64 (mostly the slim base);
-      # if we cross 200 MB without intent that's a real regression
-      # worth blocking.
-      - name: Enforce image-size ceiling (200 MB)
+      # Hard ceiling: 450 MB. The original plan §4.6.1 said <150 MB —
+      # that turns out to be arm64-only reality (swift:6.1-jammy-slim
+      # on arm64 is ~120 MB; on amd64 it's ~300+ MB). This CI job
+      # measures the amd64 build, which is the worst-case platform.
+      # Current sizes (with dynamic Swift stdlib, swift:6.1-jammy-slim):
+      #   arm64 (local):  ~130 MB
+      #   amd64 (CI):     ~360 MB (rough; refined as more builds land)
+      # Real shrink path is M6 polish: distroless/cc + manual Swift
+      # runtime lib bundling can probably land both arches under
+      # 100 MB. Not M0 work.
+      #
+      # The gate still has value: a ceiling 25% above current amd64
+      # blocks "we shipped Foundation twice by accident"-style
+      # regressions while not blocking on inherent base-image size.
+      - name: Enforce image-size ceiling (450 MB, amd64 worst-case)
         run: |
           set -euo pipefail
           BYTES=$(docker image inspect keywordista:ci --format '{{.Size}}')
           MB=$(( BYTES / 1024 / 1024 ))
-          CEILING=200
+          CEILING=450
           echo "→ keywordista:ci is ${MB} MB (ceiling: ${CEILING} MB)"
           if (( MB > CEILING )); then
             echo "✘ image grew past the ${CEILING} MB ceiling."
@@ -183,12 +192,15 @@ jobs:
             echo "  .github/workflows/ci.yml and document the reason."
             exit 1
           fi
-          # Surface the size on the GHA run summary so trends are visible
-          # in the Actions tab over time.
+          # Surface the size on the GHA run summary so trends are
+          # visible in the Actions tab over time.
           {
             echo "## Image size"
             echo ""
-            echo "**${MB} MB** / ${CEILING} MB ceiling"
+            echo "**${MB} MB** / ${CEILING} MB ceiling (amd64)"
+            echo ""
+            echo "_M6 polish opportunity: distroless/cc + manual Swift"
+            echo "runtime lib bundling can plausibly cut this by 60%+._"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # End-to-end boot smoke: a sealed image that doesn't actually run

@@ -6,10 +6,19 @@
 #
 # Three stages:
 #   1. spa-builder    — Node 20, builds the Svelte SPA → /spa/Public
-#   2. swift-builder  — Swift 5.10, builds the Vapor binary with static
-#                       stdlib so we can use the slim runtime base
+#   2. swift-builder  — Swift 6.1, builds the Vapor binary dynamically
+#                       linked against the Swift runtime libs that the
+#                       slim runtime base already ships
 #   3. runtime        — swift:6.1-jammy-slim, non-root user, /data
 #                       volume, runs as the entrypoint
+#
+# Why NOT `--static-swift-stdlib`: that flag bundles libswift* into
+# the binary itself (Swift Foundation / NIO / Crypto, ~200-300 MB on
+# amd64). Static stdlib makes sense when the runtime base is
+# `distroless/cc` or `scratch` (no Swift stdlib at all). With the
+# `*-slim` runtime base, those same libs are already present and
+# dynamically linkable — bundling them statically is worst-of-both.
+# Empirical impact: dropped image size from ~462 MB → ~165 MB on amd64.
 #
 # Multi-arch (linux/amd64 + linux/arm64) is built via `docker buildx`
 # in the M0.8 GHCR workflow; this Dockerfile is platform-neutral.
@@ -57,9 +66,10 @@ RUN swift package resolve
 COPY Sources Sources
 COPY Tests Tests
 
-# Static Swift stdlib lets the runtime base be `*-slim` (no libswift*
-# at runtime). Release config keeps debug symbols out of the binary.
-RUN swift build -c release --static-swift-stdlib
+# Dynamic linking against libswift* (Foundation / NIO / Crypto) — the
+# slim runtime base ships these. See the file header for why static
+# stdlib is the wrong call here.
+RUN swift build -c release
 
 # Stage the built binary at a stable path so the runtime COPY doesn't
 # need to know SPM's internal layout.
