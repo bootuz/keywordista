@@ -22,12 +22,31 @@ export class ApiError extends Error {
   }
 }
 
+// ── 401 hook (M2.4) ──────────────────────────────────────────────
+//
+// Inversion of control: api.ts doesn't know about routing or auth
+// stores. App.svelte registers a handler at boot that does the
+// real work (push('/login'), clear authStore). On 401, apiFetch
+// calls the handler (if any) and then still throws — so callers
+// that want to display an error UI can.
+//
+// `/auth/*` paths are excluded: the LoginPage MUST see a real 401
+// from /auth/login to show "invalid credentials" instead of being
+// silently bounced. Same logic for /auth/setup, /auth/accept-invite,
+// /auth/state, /auth/invite/:token. These endpoints either don't
+// require auth at all, or are themselves the auth flow.
+type UnauthorizedHandler = (path: string) => void | Promise<void>;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  unauthorizedHandler = handler;
+}
+
 // Single fetch wrapper: sets a JSON content-type when there's a body, parses
 // the response as JSON unless it's a 204. In server mode the cookie is HttpOnly
 // + SameSite=Strict so it ships back automatically on same-origin requests; we
-// never inject auth headers explicitly. (M2.4 adds a 401 redirect-to-/login
-// hook here.) Local mode has no auth layer at all — server binds 127.0.0.1
-// and the menubar app is the sole client.
+// never inject auth headers explicitly. Local mode has no auth layer at all —
+// server binds 127.0.0.1 and the menubar app is the sole client.
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('Content-Type')) {
@@ -35,6 +54,13 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   }
 
   const response = await fetch(BASE + path, { ...init, headers });
+
+  if (response.status === 401 && !path.startsWith('/auth/') && unauthorizedHandler) {
+    // Fire-and-forget — we still throw below so the caller can render
+    // an error toast if it wants. The handler runs whatever cleanup
+    // it needs (clear authState, push to /login) in the background.
+    void unauthorizedHandler(path);
+  }
 
   if (!response.ok) {
     const text = await response.text();
