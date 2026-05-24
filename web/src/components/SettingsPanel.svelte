@@ -20,6 +20,16 @@
   } from '../lib/stores';
   import { apps } from '../lib/stores';
   import { timeAgo } from '../lib/time';
+  // Auth gating (M2.9): credential mutation is admin-only in server
+  // mode. Local mode has no roles, so everyone can mutate. The
+  // backend enforces this with RoleMiddleware regardless of what
+  // the SPA chooses to render.
+  import { push } from 'svelte-spa-router';
+  import { isAdmin, serverMode } from '../lib/authStore';
+  import { ROUTES } from '../lib/router';
+  // Derived: true when this user is allowed to mutate ASC/ASA
+  // credentials. Local mode → always true; server mode → admin only.
+  const canMutateSettings = $derived(!$serverMode || $isAdmin);
 
   interface Props {
     onClose: () => void;
@@ -241,18 +251,24 @@
       </div>
     </section>
 
-    <!-- ASC ─────────────────────────────────────────────────────────────── -->
-    <section class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
-      <button
-        type="button"
-        onclick={() => (ascExpanded = !ascExpanded)}
-        aria-expanded={ascExpanded}
-        aria-controls="asc-section-body"
-        class="flex w-full items-center justify-between gap-2 text-left"
-      >
-        <span class="flex items-center gap-2">
+    {#if $serverMode && $isAdmin}
+      <!-- Team management entrypoint — admin-only, server-mode-only.
+           Lives in SettingsPanel so the header doesn't grow another
+           button. Closes the panel on click (push() navigates away
+           regardless, but onClose keeps state clean if the user
+           comes back via browser nav). -->
+      <section class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
+        <button
+          type="button"
+          onclick={() => { onClose(); push(ROUTES.usersAdmin); }}
+          class="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <span>
+            <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Team members</h3>
+            <p class="mt-0.5 text-xs text-zinc-500">Invite teammates, change roles, remove access.</p>
+          </span>
           <svg
-            class="h-3 w-3 text-zinc-500 transition-transform {ascExpanded ? 'rotate-90' : ''}"
+            class="h-3.5 w-3.5 text-zinc-500"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -263,29 +279,72 @@
           >
             <polyline points="9 6 15 12 9 18" />
           </svg>
-          <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">App Store Connect API</h3>
-        </span>
-        {#if ascStatus?.configured}
-          <span class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+        </button>
+      </section>
+    {/if}
+
+    <!-- ASC ─────────────────────────────────────────────────────────────── -->
+    <section class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
+      {#if canMutateSettings}
+        <button
+          type="button"
+          onclick={() => (ascExpanded = !ascExpanded)}
+          aria-expanded={ascExpanded}
+          aria-controls="asc-section-body"
+          class="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <span class="flex items-center gap-2">
             <svg
-              class="h-3.5 w-3.5"
+              class="h-3 w-3 text-zinc-500 transition-transform {ascExpanded ? 'rotate-90' : ''}"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              stroke-width="3"
+              stroke-width="2.5"
               stroke-linecap="round"
               stroke-linejoin="round"
               aria-hidden="true"
             >
-              <polyline points="5 12 10 17 19 8" />
+              <polyline points="9 6 15 12 9 18" />
             </svg>
-            Connected
+            <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">App Store Connect API</h3>
           </span>
-        {:else}
-          <span class="text-xs text-zinc-500">Not connected</span>
-        {/if}
-      </button>
-      {#if ascExpanded}
+          {#if ascStatus?.configured}
+            <span class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+              <svg
+                class="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="5 12 10 17 19 8" />
+              </svg>
+              Connected
+            </span>
+          {:else}
+            <span class="text-xs text-zinc-500">Not connected</span>
+          {/if}
+        </button>
+      {:else}
+        <!-- Member view (server mode): read-only status row, no expand
+             affordance. Backend RoleMiddleware would 403 the PUT anyway;
+             this just removes the dead-end UI. -->
+        <div class="flex w-full items-center justify-between gap-2">
+          <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">App Store Connect API</h3>
+          {#if ascStatus?.configured}
+            <span class="text-xs text-emerald-600 dark:text-emerald-400">Connected</span>
+          {:else}
+            <span class="text-xs text-zinc-500">Not connected</span>
+          {/if}
+        </div>
+        <p class="mt-2 text-xs text-zinc-500">
+          Read-only — ask an admin to update credentials.
+        </p>
+      {/if}
+      {#if ascExpanded && canMutateSettings}
         <div id="asc-section-body" class="mt-3" transition:slide={{ duration: 200 }}>
       <p class="mb-3 text-xs text-zinc-500">
         Used for fetching the keywords field you set in App Store Connect (developer keywords).
@@ -417,49 +476,64 @@
 
     <!-- ASA ─────────────────────────────────────────────────────────────── -->
     <section class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
-      <button
-        type="button"
-        onclick={() => (asaExpanded = !asaExpanded)}
-        aria-expanded={asaExpanded}
-        aria-controls="asa-section-body"
-        class="flex w-full items-center justify-between gap-2 text-left"
-      >
-        <span class="flex items-center gap-2">
-          <svg
-            class="h-3 w-3 text-zinc-500 transition-transform {asaExpanded ? 'rotate-90' : ''}"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <polyline points="9 6 15 12 9 18" />
-          </svg>
-          <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Search Ads API</h3>
-        </span>
-        {#if asaStatus?.configured}
-          <span class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+      {#if canMutateSettings}
+        <button
+          type="button"
+          onclick={() => (asaExpanded = !asaExpanded)}
+          aria-expanded={asaExpanded}
+          aria-controls="asa-section-body"
+          class="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <span class="flex items-center gap-2">
             <svg
-              class="h-3.5 w-3.5"
+              class="h-3 w-3 text-zinc-500 transition-transform {asaExpanded ? 'rotate-90' : ''}"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              stroke-width="3"
+              stroke-width="2.5"
               stroke-linecap="round"
               stroke-linejoin="round"
               aria-hidden="true"
             >
-              <polyline points="5 12 10 17 19 8" />
+              <polyline points="9 6 15 12 9 18" />
             </svg>
-            Connected
+            <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Search Ads API</h3>
           </span>
-        {:else}
-          <span class="text-xs text-zinc-500">Not connected</span>
-        {/if}
-      </button>
-      {#if asaExpanded}
+          {#if asaStatus?.configured}
+            <span class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+              <svg
+                class="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="5 12 10 17 19 8" />
+              </svg>
+              Connected
+            </span>
+          {:else}
+            <span class="text-xs text-zinc-500">Not connected</span>
+          {/if}
+        </button>
+      {:else}
+        <!-- Member view (server mode): see ASC section above for rationale. -->
+        <div class="flex w-full items-center justify-between gap-2">
+          <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Search Ads API</h3>
+          {#if asaStatus?.configured}
+            <span class="text-xs text-emerald-600 dark:text-emerald-400">Connected</span>
+          {:else}
+            <span class="text-xs text-zinc-500">Not connected</span>
+          {/if}
+        </div>
+        <p class="mt-2 text-xs text-zinc-500">
+          Read-only — ask an admin to update credentials.
+        </p>
+      {/if}
+      {#if asaExpanded && canMutateSettings}
         <div id="asa-section-body" class="mt-3" transition:slide={{ duration: 200 }}>
       <p class="mb-3 text-xs text-zinc-500">
         Used for keyword suggestions for any app. Create a Search Ads account at
