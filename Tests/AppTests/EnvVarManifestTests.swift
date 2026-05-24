@@ -175,11 +175,33 @@ struct EnvVarManifestTests {
     @Suite("bootstrap()")
     struct BootstrapTests {
 
-        @Test("Empty env in implicit server mode fails on missing required vars")
-        func emptyEnvFails() {
+        @Test("Empty env throws .modeNotSet (v0.3.5 regression guard)")
+        func emptyEnvThrowsModeNotSet() {
+            // The v0.3.5 bug came from `bootstrap` having a silent
+            // `?? "server"` fallback for KEYWORDISTA_MODE. Defaulting
+            // the other direction (?? "local") would have fixed that
+            // case but hidden the symmetric one (a Docker image
+            // misconfiguration silently booting in local mode inside
+            // a remote container). Fail-fast eliminates both: every
+            // deployment path MUST declare its intent. The three real
+            // paths already do — Dockerfile ENV, ServiceSupervisor,
+            // and test fixtures. This test pins that contract shut.
             let env = ManifestEnv.fixture([:])
-            #expect(throws: EnvVarError.self) {
+            do {
                 _ = try Manifest.bootstrap(env: env)
+                Issue.record("expected .modeNotSet to throw")
+            } catch let err as EnvVarError {
+                guard case .modeNotSet = err else {
+                    Issue.record("expected .modeNotSet, got \(err)"); return
+                }
+                // Sanity-check that the message includes the remediation
+                // hint — that hint IS the documentation for anyone
+                // hitting this in the wild.
+                #expect("\(err)".contains("KEYWORDISTA_MODE must be set"))
+                #expect("\(err)".contains("local"))
+                #expect("\(err)".contains("server"))
+            } catch {
+                Issue.record("expected EnvVarError, got \(error)")
             }
         }
 

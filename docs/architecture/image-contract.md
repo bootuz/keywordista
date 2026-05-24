@@ -137,8 +137,11 @@ Swift source** as the Docker image — different distribution, identical
 env-var contract. The platform difference manifests in exactly two
 places in the codebase:
 
-1. `KEYWORDISTA_MODE=local` (set explicitly by the menubar app)
-   versus `=server` (the image's default).
+1. `KEYWORDISTA_MODE=local` (set explicitly by the menubar app via
+   `ServiceSupervisor.makeChildEnvironment`) versus `=server` (set
+   explicitly in the Dockerfile's `ENV` block). The mode has **no
+   default** — `Manifest.bootstrap` throws `EnvVarError.modeNotSet`
+   if unset, forcing every deployment path to declare its intent.
 2. `EncryptionKeyResolver` derives the encryption key from
    `IOPlatformUUID` in local mode on macOS — guarded by
    `#if os(macOS)`, never reached on Linux.

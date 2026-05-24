@@ -36,5 +36,13 @@ echo "→ building web bundle…"
 
 echo "→ starting Vapor on http://127.0.0.1:8080"
 echo
+# Dev-loop default: local mode (single-user, no auth, binds 127.0.0.1).
+# KEYWORDISTA_MODE has no default — the server fail-fasts on unset to
+# eliminate the v0.3.5-class footgun where a wrong silent default
+# could boot the server in the wrong configuration. The macOS app and
+# Docker image set it themselves; this launcher sets it for dev.
+# Pre-existing value (e.g. `KEYWORDISTA_MODE=server ./keywordista`)
+# wins so a contributor experimenting with server mode isn't fought.
+export KEYWORDISTA_MODE="${KEYWORDISTA_MODE:-local}"
 # `exec` so Ctrl+C goes straight to Vapor — no orphan processes on Ctrl+C.
 exec swift run

@@ -23,14 +23,30 @@ dual support.
 ### `KEYWORDISTA_MODE`
 
 - **Type:** `local` \| `server`
-- **Required:** no
-- **Default:** `server` (in the Docker image; the macOS app sets `local`)
+- **Required:** **yes — must be set explicitly**
+- **Default:** none (boot throws `EnvVarError.modeNotSet` if unset)
 - **Since:** 1.0
 
 Runtime mode. `local` skips auth, binds to 127.0.0.1, single-user — used
 by the macOS menubar app's spawned backend. `server` registers the auth
 middleware, binds to 0.0.0.0, and **requires** both
 `KEYWORDISTA_ENCRYPTION_KEY` and `KEYWORDISTA_PUBLIC_BASE_URL`.
+
+**Why fail-fast instead of a default?** Either default leaves a footgun:
+defaulting to `server` crashes any macOS-spawn / dev-loop path that
+forgets to set it (the v0.3.5 regression); defaulting to `local` would
+silently boot a misconfigured Docker image as a single-user backend
+bound to 127.0.0.1 inside a remote container nobody can reach.
+Requiring explicit intent eliminates both symmetric bugs.
+
+The three real deployment paths set it for you:
+
+- **Docker image** — `Dockerfile` sets `ENV KEYWORDISTA_MODE=server`.
+- **macOS menubar app** — `ServiceSupervisor.makeChildEnvironment` sets `KEYWORDISTA_MODE=local`.
+- **`swift run` dev loops** — prefix the command:
+  ```bash
+  KEYWORDISTA_MODE=local swift run App serve --hostname 127.0.0.1 --port 9999
+  ```
 
 ---
 

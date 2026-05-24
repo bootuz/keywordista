@@ -129,6 +129,12 @@ public struct EnvVar<Value: Sendable>: EnvVarSpec, Sendable {
 public enum EnvVarError: Error, CustomStringConvertible {
     case missingRequired(name: String, mode: RuntimeMode)
     case parseFailed(name: String, raw: String, reason: String)
+    /// `KEYWORDISTA_MODE` is unset. Distinct from `missingRequired` because
+    /// the mode itself can't be "required in a mode" (the chicken-and-egg
+    /// from `bootstrap`) — its own absence is a fatal, mode-independent
+    /// boot error. The remediation goes in the message so anyone hitting
+    /// it learns the fix in one read.
+    case modeNotSet
 
     public var description: String {
         switch self {
@@ -136,6 +142,15 @@ public enum EnvVarError: Error, CustomStringConvertible {
             return "env var \(name) is required in \(mode.rawValue) mode but is not set"
         case .parseFailed(let name, let raw, let reason):
             return "env var \(name)=\(raw.prefix(40)) failed to parse: \(reason)"
+        case .modeNotSet:
+            return """
+                KEYWORDISTA_MODE must be set explicitly to 'local' or 'server'.
+                  • local  — single-user, no auth, binds 127.0.0.1 (macOS app, dev loops).
+                  • server — multi-user with auth, binds 0.0.0.0; also requires \
+                KEYWORDISTA_ENCRYPTION_KEY + KEYWORDISTA_PUBLIC_BASE_URL.
+                The published Docker image sets this for you via ENV. For \
+                `swift run` dev: prefix with `KEYWORDISTA_MODE=local`.
+                """
         }
     }
 }
@@ -285,10 +300,19 @@ public enum EnvVars {
 
     public static let mode = EnvVar<RuntimeMode>(
         name: "KEYWORDISTA_MODE",
-        description: "Runtime mode. `local` skips auth, binds 127.0.0.1; `server` registers auth, binds 0.0.0.0, requires KEYWORDISTA_ENCRYPTION_KEY.",
+        description: "Runtime mode. `local` skips auth, binds 127.0.0.1; `server` registers auth, binds 0.0.0.0, also requires KEYWORDISTA_ENCRYPTION_KEY + KEYWORDISTA_PUBLIC_BASE_URL. MUST be set explicitly — `Manifest.bootstrap` throws EnvVarError.modeNotSet when this is unset. Docker image sets it via ENV; macOS app sets it via ServiceSupervisor; `swift run` dev loops must prefix the command (`KEYWORDISTA_MODE=local swift run …`).",
+        // `.never` here means "the standard validator doesn't require
+        // it" — mode is special-cased earlier in bootstrap (chicken-
+        // and-egg: validateAll needs a mode to evaluate against), and
+        // bootstrap throws .modeNotSet on its own. Don't try to express
+        // mode's requirement via RequiredIn; the lifecycle is different.
         requiredIn: .never,
-        defaults: { _ in .server },
-        defaultDescription: { _ in "server" },
+        // Defaults intentionally nil. The `.local` default this had
+        // briefly during the v0.3.5 fix would have implied the var
+        // was optional — but bootstrap fail-fasts on unset, so the
+        // honest signal is "no default; you must set it."
+        defaults: { _ in nil },
+        defaultDescription: { _ in "(required; set to `local` or `server`)" },
         parse: Parsers.mode
     )
 
@@ -546,7 +570,24 @@ public struct Manifest: Sendable {
     /// or throws on (a) bad KEYWORDISTA_MODE value, (b) a `requiredIn`
     /// constraint failing, (c) any parse error encountered while validating.
     public static func bootstrap(env: ManifestEnv = .processEnv) throws -> Manifest {
-        let modeRaw = env.get(EnvVars.mode.name) ?? "server"
+        // KEYWORDISTA_MODE MUST be explicit. The v0.3.5 regression came
+        // from this line having a `?? "server"` fallback that silently
+        // chose a mode nobody asked for. Defaulting to "local" would
+        // have fixed *that* bug but introduced the symmetric one — a
+        // Docker image misconfiguration could silently boot in local
+        // mode (no auth, 127.0.0.1) inside a remote container nobody
+        // can reach. Fail-fast eliminates the whole class: every
+        // deployment path must declare its intent.
+        //
+        // The three paths that consume the image/binary already set it:
+        //   • Docker image  → ENV KEYWORDISTA_MODE=server  (Dockerfile)
+        //   • macOS spawn   → env["KEYWORDISTA_MODE"]="local"
+        //                                    (ServiceSupervisor)
+        //   • Test harness  → ManifestEnv.fixture(["KEYWORDISTA_MODE": ...])
+        // For `swift run` dev: `KEYWORDISTA_MODE=local swift run App serve …`
+        guard let modeRaw = env.get(EnvVars.mode.name) else {
+            throw EnvVarError.modeNotSet
+        }
         let resolvedMode: RuntimeMode
         do {
             resolvedMode = try EnvVars.mode.parse(modeRaw)
