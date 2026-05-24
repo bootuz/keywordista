@@ -116,6 +116,7 @@ public func configure(_ app: Application) async throws {
     // upgraded to `server` later without manual SQL.
     app.migrations.add(CreateUsers())
     app.migrations.add(CreateAuthSessions())
+    app.migrations.add(CreateInvites())
 
     try await app.autoMigrate()
 
