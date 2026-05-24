@@ -217,7 +217,7 @@ struct AuthIntegrationTests {
     @Suite("/auth/state")
     struct StateTests {
 
-        @Test("Returns firstRun=true / signedIn=false on a freshly-set-up empty app")
+        @Test("Returns firstRun=true / signedIn=false / mode=server on a freshly-set-up empty app")
         func freshAppShowsFirstRun() async throws {
             let app = try await AuthTestApp.make()
             defer { Task { try? await app.asyncShutdown() } }
@@ -230,6 +230,10 @@ struct AuthIntegrationTests {
                     #expect(body?.firstRun == true)
                     #expect(body?.signedIn == false)
                     #expect(body?.user == nil)
+                    // M2.0: mode field — SPA branches on this to hide
+                    // auth UI in local mode. AuthTestApp is wired for
+                    // server mode (so middleware tests are meaningful).
+                    #expect(body?.mode == "server")
                 }
             )
         }
@@ -512,6 +516,176 @@ struct AuthIntegrationTests {
                 },
                 afterResponse: { res async in
                     #expect(res.status == .forbidden)
+                }
+            )
+        }
+    }
+
+    // ── GET /auth/invite/:token (M2.0) ───────────────────────────────
+
+    @Suite("Invite pre-validation")
+    struct InviteValidationTests {
+
+        @Test("Valid token returns 200 with role + expiresAt + null email for open invite")
+        func validOpenInviteReturnsSummary() async throws {
+            let app = try await AuthTestApp.make()
+            defer { Task { try? await app.asyncShutdown() } }
+            let adminCookie = try await AuthTestApp.setupAdmin(on: app)
+
+            // Admin creates an open (no-email-pin) invite.
+            var token: String?
+            try await app.test(
+                .POST, "/api/v1/users/invite",
+                headers: AuthTestApp.cookieHeaders(adminCookie),
+                beforeRequest: { req in
+                    try req.content.encode(["role": "member"])
+                },
+                afterResponse: { res async in
+                    token = (try? res.content.decode(InviteCreatedResponse.self))?.token
+                }
+            )
+            guard let token else { Issue.record("no token returned"); return }
+
+            try await app.test(
+                .GET, "/api/v1/auth/invite/\(token)",
+                afterResponse: { res async in
+                    #expect(res.status == .ok)
+                    let body = try? res.content.decode(InviteSummary.self)
+                    #expect(body?.email == nil)
+                    #expect(body?.role == "member")
+                    #expect(body?.expiresAt ?? .distantPast > Date())
+                }
+            )
+        }
+
+        @Test("Pinned-email invite echoes the email back")
+        func pinnedInviteEchoesEmail() async throws {
+            let app = try await AuthTestApp.make()
+            defer { Task { try? await app.asyncShutdown() } }
+            let adminCookie = try await AuthTestApp.setupAdmin(on: app)
+
+            var token: String?
+            try await app.test(
+                .POST, "/api/v1/users/invite",
+                headers: AuthTestApp.cookieHeaders(adminCookie),
+                beforeRequest: { req in
+                    try req.content.encode([
+                        "role": "admin",
+                        "email": "next-admin@studio.local",
+                    ])
+                },
+                afterResponse: { res async in
+                    token = (try? res.content.decode(InviteCreatedResponse.self))?.token
+                }
+            )
+            guard let token else { Issue.record("no token returned"); return }
+
+            try await app.test(
+                .GET, "/api/v1/auth/invite/\(token)",
+                afterResponse: { res async in
+                    let body = try? res.content.decode(InviteSummary.self)
+                    #expect(body?.email == "next-admin@studio.local")
+                    #expect(body?.role == "admin")
+                }
+            )
+        }
+
+        @Test("Unknown token returns 404")
+        func unknownReturns404() async throws {
+            let app = try await AuthTestApp.make()
+            defer { Task { try? await app.asyncShutdown() } }
+
+            let fakeToken = Invite.generateToken()
+            try await app.test(
+                .GET, "/api/v1/auth/invite/\(fakeToken)",
+                afterResponse: { res async in
+                    #expect(res.status == .notFound)
+                }
+            )
+        }
+
+        @Test("Consumed invite returns 410 Gone")
+        func consumedReturns410() async throws {
+            let app = try await AuthTestApp.make()
+            defer { Task { try? await app.asyncShutdown() } }
+            let adminCookie = try await AuthTestApp.setupAdmin(on: app)
+
+            // Create + consume an invite manually so the test doesn't
+            // depend on the accept-invite round-trip.
+            var token: String?
+            try await app.test(
+                .POST, "/api/v1/users/invite",
+                headers: AuthTestApp.cookieHeaders(adminCookie),
+                beforeRequest: { req in
+                    try req.content.encode(["role": "member"])
+                },
+                afterResponse: { res async in
+                    token = (try? res.content.decode(InviteCreatedResponse.self))?.token
+                }
+            )
+            guard let token else { Issue.record("no token returned"); return }
+
+            // Mark consumed directly in the DB. Reuse the admin user
+            // as the "consumed by" target — `consume(by:)` writes a FK
+            // and a random UUID would trip the foreign-key constraint.
+            let admin = try await User.query(on: app.db).first()
+            let invite = try await Invite.query(on: app.db)
+                .filter(\.$token == token)
+                .first()
+            invite?.consume(by: try admin!.requireID())
+            try await invite?.save(on: app.db)
+
+            try await app.test(
+                .GET, "/api/v1/auth/invite/\(token)",
+                afterResponse: { res async in
+                    #expect(res.status == .gone)
+                }
+            )
+        }
+
+        @Test("Expired invite returns 422")
+        func expiredReturns422() async throws {
+            let app = try await AuthTestApp.make()
+            defer { Task { try? await app.asyncShutdown() } }
+            let adminCookie = try await AuthTestApp.setupAdmin(on: app)
+
+            var token: String?
+            try await app.test(
+                .POST, "/api/v1/users/invite",
+                headers: AuthTestApp.cookieHeaders(adminCookie),
+                beforeRequest: { req in
+                    try req.content.encode(["role": "member"])
+                },
+                afterResponse: { res async in
+                    token = (try? res.content.decode(InviteCreatedResponse.self))?.token
+                }
+            )
+            guard let token else { Issue.record("no token returned"); return }
+
+            // Backdate expiry to 1 minute ago.
+            let invite = try await Invite.query(on: app.db)
+                .filter(\.$token == token)
+                .first()
+            invite?.expiresAt = Date().addingTimeInterval(-60)
+            try await invite?.save(on: app.db)
+
+            try await app.test(
+                .GET, "/api/v1/auth/invite/\(token)",
+                afterResponse: { res async in
+                    #expect(res.status == .unprocessableEntity)
+                }
+            )
+        }
+
+        @Test("Malformed token returns 400 (input validator rejects before DB hit)")
+        func malformedTokenReturns400() async throws {
+            let app = try await AuthTestApp.make()
+            defer { Task { try? await app.asyncShutdown() } }
+
+            try await app.test(
+                .GET, "/api/v1/auth/invite/not-a-real-token",
+                afterResponse: { res async in
+                    #expect(res.status == .badRequest)
                 }
             )
         }
