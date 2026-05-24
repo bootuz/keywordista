@@ -97,6 +97,10 @@ public func configure(_ app: Application) async throws {
     let database = try DatabaseProvider.resolve(from: manifest)
     try database.register(on: app)
     try await database.applyDriverSpecificTuning(on: app)
+    // Stash the resolved provider so BackupController (M1.11) can
+    // ask "am I SQLite or Postgres?" without re-resolving from the
+    // manifest. Same pattern as app.secretBox.
+    app.databaseProvider = database
 
     // Encryption-at-rest (M1.9). Resolve the runtime SecretBox once
     // here so the M1.9 migration AND every per-request SettingsService

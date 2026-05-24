@@ -69,6 +69,12 @@ func routes(_ app: Application, manifest: Manifest) throws {
         try api.register(collection: DashboardController())
         try api.register(collection: SettingsController())
         try api.register(collection: ChartsController())
+        // Backup endpoint (M1.11) — registered in both modes so the
+        // cockpit's BackupDownloader (M5) has one code path that
+        // works against local OR remote instances. In local mode
+        // it's under /api/v1/admin (no auth); in server mode it's
+        // gated by RoleMiddleware.requireAdmin below.
+        BackupController().register(on: api.grouped("admin"))
 
     case .server:
         // Server mode: every API call needs a valid session cookie.
@@ -93,5 +99,10 @@ func routes(_ app: Application, manifest: Manifest) throws {
             inviteTTLDays: try manifest.require(EnvVars.inviteTTLDays)
         )
         usersController.register(on: admin.grouped("users"))
+
+        // Backup endpoint (M1.11) — admin-only in server mode. See
+        // the local-mode comment above for why this is registered
+        // in both modes.
+        BackupController().register(on: admin.grouped("admin"))
     }
 }
