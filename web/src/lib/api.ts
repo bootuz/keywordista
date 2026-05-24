@@ -14,7 +14,7 @@ import type {
   ChartEvent,
 } from './types';
 
-const BASE = '/api/v1';
+export const BASE = '/api/v1';
 
 export class ApiError extends Error {
   constructor(public status: number, public body: string) {
@@ -23,10 +23,12 @@ export class ApiError extends Error {
 }
 
 // Single fetch wrapper: sets a JSON content-type when there's a body, parses
-// the response as JSON unless it's a 204. The server runs on 127.0.0.1 only
-// and has no auth layer (see Phase 5b in the plan) so there's no header
-// injection here.
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+// the response as JSON unless it's a 204. In server mode the cookie is HttpOnly
+// + SameSite=Strict so it ships back automatically on same-origin requests; we
+// never inject auth headers explicitly. (M2.4 adds a 401 redirect-to-/login
+// hook here.) Local mode has no auth layer at all — server binds 127.0.0.1
+// and the menubar app is the sole client.
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
