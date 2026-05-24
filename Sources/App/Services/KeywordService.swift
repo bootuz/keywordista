@@ -8,10 +8,19 @@ enum KeywordServiceError: Error, Equatable {
 
 protocol KeywordServiceProtocol: Sendable {
     func list() async throws -> [Keyword]
-    func create(term: String, countryCode: String) async throws -> Keyword
+    func create(term: String, countryCode: String, creatorID: UUID?) async throws -> Keyword
     func delete(id: UUID) async throws
     func enqueueRefresh(id: UUID) async throws
     func enqueueRefreshAll() async throws -> Int
+}
+
+extension KeywordServiceProtocol {
+    /// Backwards-compat default — keeps existing test call sites
+    /// on the simpler 2-arg form. New auth-aware call sites pass
+    /// req.auth.get(User.self)?.id explicitly.
+    func create(term: String, countryCode: String) async throws -> Keyword {
+        try await create(term: term, countryCode: countryCode, creatorID: nil)
+    }
 }
 
 struct KeywordService: KeywordServiceProtocol {
@@ -22,13 +31,13 @@ struct KeywordService: KeywordServiceProtocol {
         try await repository.all()
     }
 
-    func create(term: String, countryCode: String) async throws -> Keyword {
+    func create(term: String, countryCode: String, creatorID: UUID?) async throws -> Keyword {
         let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw KeywordServiceError.emptyTerm }
         let cc = countryCode.lowercased()
         guard cc.count == 2 else { throw KeywordServiceError.invalidCountryCode }
 
-        let keyword = Keyword(term: trimmed, countryCode: cc)
+        let keyword = Keyword(term: trimmed, countryCode: cc, creatorID: creatorID)
         try await repository.save(keyword)
         try await dispatcher.dispatch(keywordID: try keyword.requireID())
         return keyword

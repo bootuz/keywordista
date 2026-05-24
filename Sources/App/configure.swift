@@ -188,5 +188,5 @@ public func configure(_ app: Application) async throws {
     try app.queues.startInProcessJobs(on: .default)
     try app.queues.startScheduledJobs()
 
-    try routes(app)
+    try routes(app, manifest: manifest)
 }
