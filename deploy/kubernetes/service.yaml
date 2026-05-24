@@ -1,0 +1,25 @@
+# ClusterIP Service for Keywordista.
+#
+# Type ClusterIP because typical deploys put an Ingress in front (see
+# ingress.yaml). For dev/test on a local cluster (kind, minikube, k3d),
+# you can `kubectl port-forward svc/keywordista 8080:80`.
+#
+# If you want LoadBalancer instead (cloud-provider LB, e.g. on GKE/EKS),
+# change `type: ClusterIP` to `type: LoadBalancer` and skip the
+# ingress.yaml. The image is the same.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: keywordista
+  labels:
+    app.kubernetes.io/name: keywordista
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keywordista
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

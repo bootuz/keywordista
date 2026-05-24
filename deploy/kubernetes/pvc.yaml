@@ -1,0 +1,23 @@
+# PersistentVolumeClaim for Keywordista's /data dir.
+#
+# 1 GB is plenty for SQLite + the few MB of metadata Keywordista
+# stores; bump to 10 GB for a deployment tracking many apps with
+# long history retention. Postgres deploys can use a separate PVC
+# (or external managed DB) and ignore this one.
+#
+# ReadWriteOnce because we never run more than one replica — see the
+# §4.10 single-instance constraint in the deploy plan.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: keywordista-data
+  labels:
+    app.kubernetes.io/name: keywordista
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: standard   # uncomment + set to your cluster's class

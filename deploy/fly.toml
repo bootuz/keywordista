@@ -1,0 +1,88 @@
+# Fly.io app config for Keywordista.
+#
+# Deploy:
+#   1. Install flyctl: brew install flyctl
+#   2. flyctl auth login
+#   3. From a checkout of this repo:
+#      flyctl launch --copy-config --no-deploy
+#        # this picks up fly.toml; choose your app name + region
+#      flyctl volumes create keywordista_data --size 1 --region <your-region>
+#      flyctl secrets set \
+#        KEYWORDISTA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
+#        KEYWORDISTA_PUBLIC_BASE_URL=https://<your-app>.fly.dev
+#      flyctl deploy
+#   4. Visit https://<your-app>.fly.dev → setup wizard.
+#
+# Cost: shared-cpu-1x with 256MB RAM is the cheapest viable size
+# (~free on the Hobby plan; ~$2/mo if you exceed the free allowances).
+# 1 GB volume is ~$0.15/mo. Total: free → a few dollars/mo.
+#
+# The cockpit's Fly provider (M4) creates the equivalent app via Fly's
+# Machines API directly, producing the same shape as this config.
+
+app = "keywordista"  # rename to your-chosen-name
+primary_region = "iad"  # change to your closest region — `flyctl platform regions`
+
+# Image pulled from GHCR. cockpit deploys pin by @sha256:<digest>; the
+# committed config uses :latest for the manual-deploy convenience case.
+[build]
+  image = "ghcr.io/bootuz/keywordista:latest"
+
+# Persistent data dir for SQLite. Volume name matches the
+# `flyctl volumes create keywordista_data` step in the README above.
+[mounts]
+  source = "keywordista_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+# Single instance, by design. SQLite + iTunes API throttling both make
+# horizontal scaling the wrong answer here; the §4.10 abstraction
+# documents this constraint formally.
+[deploy]
+  strategy = "rolling"   # one-at-a-time replace; fine because count is 1
+
+# Resource sizing. shared-cpu-1x + 256MB is the cheapest viable for an
+# indie deployment; bump cpu_kind/cpus/memory for larger teams.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "256mb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"     # don't stop — schedulers and queue work
+  auto_start_machines = true
+  min_machines_running = 1
+  max_machines_running = 1       # see "single instance" note above
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 25
+    hard_limit = 50
+
+# Image binds 0.0.0.0:8080 in server mode automatically (KEYWORDISTA_MODE
+# is set by the image's ENV defaults — operator doesn't have to set it).
+[env]
+  KEYWORDISTA_MODE = "server"
+  KEYWORDISTA_DATA_DIR = "/data"
+  # KEYWORDISTA_PUBLIC_BASE_URL is set via `flyctl secrets set` (above)
+  # so it stays out of git.
+
+# Health checks — Fly hits these to decide whether the machine is healthy.
+# The image's own Dockerfile HEALTHCHECK still runs too; both fire.
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "get"
+  path = "/health"
+  protocol = "http"
+  timeout = "5s"
+
+# ── Optional: Fly Postgres ──────────────────────────────────────────
+#
+# Provision a Fly-managed Postgres cluster:
+#   flyctl postgres create --name keywordista-pg
+#   flyctl postgres attach --app keywordista keywordista-pg
+# That second command auto-injects DATABASE_URL into this app's
+# secrets, no fly.toml edit needed.
