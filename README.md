@@ -34,6 +34,43 @@ Prefer no menu-bar app? Run `./keywordista` to `exec` the Vapor server in the fo
 
 ---
 
+## Deploy for your team
+
+Solo on a Mac is the canonical path, but Keywordista also publishes a single configurable Docker image so a studio of 2–10 devs can self-host it on any server they like — Render, Fly.io, a $4/mo Hetzner VPS, a Kubernetes cluster, a Nomad job, a Raspberry Pi. One team per deployment, no SaaS, no subscription, the data lives in their database forever.
+
+The quickest path is raw Docker:
+
+```bash
+docker run -d \
+  --name keywordista \
+  -p 8080:8080 \
+  -v keywordista-data:/data \
+  -e KEYWORDISTA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
+  -e KEYWORDISTA_PUBLIC_BASE_URL=https://keywordista.example.com \
+  ghcr.io/bootuz/keywordista:latest
+```
+
+Visit your URL → setup wizard creates the admin user → invite teammates from inside the dashboard. The image is signed with cosign + carries SLSA-3 provenance; verification commands and the full env-var contract are documented below.
+
+Reference deploy manifests live in [`deploy/`](deploy/):
+
+- [`deploy/docker-compose.yml`](deploy/docker-compose.yml) — VPS / homelab, optional Postgres + Caddy auto-TLS + Litestream backup
+- [`deploy/render.yaml`](deploy/render.yaml) — Render Blueprint (~$7/mo)
+- [`deploy/fly.toml`](deploy/fly.toml) — Fly.io app (free tier viable)
+- [`deploy/kubernetes/`](deploy/kubernetes/) — Deployment + Service + PVC + Ingress
+- [`deploy/nomad/`](deploy/nomad/) — Nomad job spec
+
+Docs:
+
+- [`docs/deploy/raw-docker.md`](docs/deploy/raw-docker.md) — minimum-viable `docker run`, supply-chain verification, upgrades, backups
+- [`docs/env-vars.md`](docs/env-vars.md) — full env-var contract reference
+- [`docs/architecture/image-contract.md`](docs/architecture/image-contract.md) — what the image promises (SemVer, backcompat policy)
+- [`docs/architecture/exit-codes.md`](docs/architecture/exit-codes.md) — non-zero exit reference for ops debugging
+
+The cockpit's in-Mac "Deploy to a server…" flow (shipping later) automates all of this from the menubar app — pick a provider, paste an API token, wait 90 seconds. Until then, the manifests above are the canonical reference.
+
+---
+
 ## How it works
 
 ```
