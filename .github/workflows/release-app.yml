@@ -45,6 +45,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space (macOS runner cleanup)
+        # macos-15 runners start with ~14GB free. The release build needs:
+        #   • Vapor + deps SPM compile output:   ~6-8GB across both archs
+        #   • Menubar SwiftPM compile output:     ~1-2GB
+        #   • DMG creation scratch (hdiutil):    ~2× the final .app size
+        # Without this step the v0.5.0-beta1 release ran out of space at
+        # the hdiutil step: "create failed - No space left on device".
+        # Removing iOS/watchOS/tvOS/visionOS platform support from the
+        # bundled Xcodes + the iOS Simulator runtimes frees ~20-30GB —
+        # we're a macOS-only menubar app, none of those are needed.
+        run: |
+          set -euo pipefail
+          echo "── Before cleanup ──"
+          df -h /
+          # iOS Simulator runtimes are the biggest single waste — each
+          # iOS version is ~5-7GB and the runner has multiple installed.
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
+          # Non-macOS platform support inside the installed Xcodes.
+          # mac/build-dmg.sh only uses Swift compilation for the macOS
+          # platform; iPhone/Watch/TV/Vision platform SDKs are dead
+          # weight here.
+          sudo rm -rf /Applications/Xcode*.app/Contents/Developer/Platforms/iPhone*.platform || true
+          sudo rm -rf /Applications/Xcode*.app/Contents/Developer/Platforms/WatchOS*.platform || true
+          sudo rm -rf /Applications/Xcode*.app/Contents/Developer/Platforms/WatchSimulator*.platform || true
+          sudo rm -rf /Applications/Xcode*.app/Contents/Developer/Platforms/AppleTVOS*.platform || true
+          sudo rm -rf /Applications/Xcode*.app/Contents/Developer/Platforms/AppleTVSimulator*.platform || true
+          sudo rm -rf /Applications/Xcode*.app/Contents/Developer/Platforms/XROS*.platform || true
+          sudo rm -rf /Applications/Xcode*.app/Contents/Developer/Platforms/XRSimulator*.platform || true
+          # Android SDK if present (Keywordista has zero Android touch points)
+          sudo rm -rf "$ANDROID_HOME" 2>/dev/null || true
+          sudo rm -rf /Library/Android 2>/dev/null || true
+          echo "── After cleanup ──"
+          df -h /
+
       - name: Determine version
         id: version
         run: |
