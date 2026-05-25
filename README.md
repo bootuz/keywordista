@@ -1,6 +1,9 @@
 # Keywordista - App Store keyword tracker for indie iOS developers
 
 [![CI](https://github.com/bootuz/keywordista/actions/workflows/ci.yml/badge.svg)](https://github.com/bootuz/keywordista/actions/workflows/ci.yml)
+[![Release App](https://github.com/bootuz/keywordista/actions/workflows/release-app.yml/badge.svg)](https://github.com/bootuz/keywordista/actions/workflows/release-app.yml)
+[![Release Service](https://github.com/bootuz/keywordista/actions/workflows/release-service.yml/badge.svg)](https://github.com/bootuz/keywordista/actions/workflows/release-service.yml)
+[![Release Image](https://github.com/bootuz/keywordista/actions/workflows/release-image.yml/badge.svg)](https://github.com/bootuz/keywordista/actions/workflows/release-image.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey.svg)](#install)
 
