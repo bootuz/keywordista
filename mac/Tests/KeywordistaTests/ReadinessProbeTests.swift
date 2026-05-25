@@ -182,6 +182,43 @@ final class ReadinessProbeTests: XCTestCase {
         XCTAssertLessThanOrEqual(clock.sleeps.count, expectedSleeps + 1)
     }
 
+    // ── Cancellation (M3.24a) ────────────────────────────────────────
+
+    func testWaitForReadyReturnsCancelledWhenTaskCancelled() async {
+        // The .cancelled outcome path was structurally unreachable in
+        // the original M3.20 test suite — FakeProbeClock.sleep didn't
+        // throw, so the production `catch { return .cancelled }` was
+        // dead code from a test perspective. M3.24a hardened the clock
+        // to honor Task.checkCancellation; this test exercises the
+        // path the cockpit's cancel-mid-probe scenario depends on.
+        //
+        // Production behavior: when the user clicks Cancel during the
+        // 90s probe window, the parent Task is cancelled → the next
+        // clock.sleep throws → waitForReady catches and returns
+        // .cancelled → the coordinator transitions to .failed (M3.24a
+        // also fixed the previously-stuck .deploying phase here).
+        MockProbeURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 503,
+                             httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        let session = mockSession()
+        let task = Task<ReadinessProbe.Outcome, Never> {
+            await ReadinessProbe.waitForReady(
+                baseURL: URL(string: "https://example.com")!,
+                clock: FakeProbeClock(),
+                session: session
+            )
+        }
+        // Cancel before the first probe completes a sleep cycle.
+        // Task.cancel is cooperative; the throw inside clock.sleep
+        // unblocks the loop, which returns .cancelled.
+        task.cancel()
+        let outcome = await task.value
+        XCTAssertEqual(outcome, .cancelled,
+                      "Cancelled task must return .cancelled, not .timedOut or .ready")
+    }
+
     // ── statusSink wiring ────────────────────────────────────────────
 
     @MainActor
@@ -260,6 +297,15 @@ private final class FakeProbeClock: ProbeClock, @unchecked Sendable {
     var sleeps: [TimeInterval] { state.withLock { $0.sleeps } }
 
     func sleep(seconds: TimeInterval) async throws {
+        // M3.24a: honor cooperative cancellation. Previously this just
+        // advanced the virtual clock — meaning the production
+        // `catch { return .cancelled }` branch in waitForReady was
+        // structurally unreachable from tests using this clock.
+        // The whole point of the .cancelled outcome is that
+        // production's `Task.sleep` throws when the enclosing task
+        // is cancelled; the fake clock should mirror that contract
+        // so cancellation tests can exercise the same code path.
+        try Task.checkCancellation()
         state.withLock { s in
             s.sleeps.append(seconds)
             s.now = s.now.addingTimeInterval(seconds)

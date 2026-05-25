@@ -124,6 +124,19 @@ final class DeployFlowCoordinator: ObservableObject {
     /// button (auth errors → no; network blips → yes).
     @Published var failure: FailureContext?
 
+    /// M3.24a injection seam: lets DeployFlowCoordinatorTests exercise
+    /// the `.timedOut` and `.cancelled` branches of `transitionToSuccess`
+    /// without standing up a fake URLSession + HTTP stack just to drive
+    /// a single boolean outcome. Production callers leave this default;
+    /// tests assign a closure that returns the outcome they're testing.
+    ///
+    /// Kept `internal` (not `private`) because the test target uses
+    /// `@testable import Keywordista`. Not exposed in any public API.
+    typealias ReadinessProbeFn = @MainActor (URL, @escaping @MainActor (String) -> Void) async -> ReadinessProbe.Outcome
+    var readinessProbe: ReadinessProbeFn = { url, sink in
+        await ReadinessProbe.waitForReady(baseURL: url, statusSink: sink)
+    }
+
     // MARK: - Init
 
     init(
@@ -431,13 +444,13 @@ final class DeployFlowCoordinator: ObservableObject {
         // M3.20: wait for /api/v1/auth/state to answer too, not just
         // /health. The status sink writes into currentDeployStatus so
         // the user sees readable progress instead of a frozen screen.
+        // M3.24a: invoked via `readinessProbe` closure to allow tests
+        // to inject .timedOut / .cancelled outcomes without standing
+        // up a fake URLSession.
         currentDeployStatus = "Health check passed — verifying server is fully ready…"
-        let outcome = await ReadinessProbe.waitForReady(
-            baseURL: url,
-            statusSink: { [weak self] status in
-                self?.currentDeployStatus = status
-            }
-        )
+        let outcome = await readinessProbe(url) { [weak self] status in
+            self?.currentDeployStatus = status
+        }
         switch outcome {
         case .ready:
             break  // fall through to build the RemoteInstance below
@@ -457,8 +470,24 @@ final class DeployFlowCoordinator: ObservableObject {
             phase = .failed
             return
         case .cancelled:
-            // Window was closed / user cancelled mid-probe. The phase
-            // is already .deploying; let the caller clean up.
+            // M3.24a: cancellation mid-probe. Previously we returned
+            // silently here, but the for-await loop in
+            // startConsumingDeployEvents *also* returns after this,
+            // leaving phase pinned to .deploying forever — a frozen
+            // UI with no recovery path. cancel() does destroy the
+            // provider service, but the user never sees a state
+            // change confirming it.
+            //
+            // Symmetric with .timedOut: surface the cancellation via
+            // FailureContext so DeployingView can render a clear
+            // "Deploy cancelled" message + leave the deploying state.
+            // retryable=false because the operator's intent was to
+            // stop, not to retry against the same partial state.
+            failure = FailureContext(
+                reason: "Deploy cancelled during the post-health readiness check.",
+                retryable: false
+            )
+            phase = .failed
             return
         }
 

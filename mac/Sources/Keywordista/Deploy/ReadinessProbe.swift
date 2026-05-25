@@ -36,18 +36,25 @@ enum ReadinessProbe {
     /// is genuinely wrong and the user needs to see the provider logs.
     static let timeout: TimeInterval = 90
 
-    /// Poll every 3s → 30 attempts in the timeout window. Faster polling
-    /// would be wasted: post-/health, the auth routes either come up
-    /// within a couple seconds or they never come up. 3s gives the
-    /// status sink a readable cadence without burning provider quota.
+    /// Poll every 3s. Per-iteration wall time is therefore at most
+    /// `requestTimeout + interval` = 2 + 3 = 5s. Worst case across the
+    /// 90s budget: 90/5 ≈ 18 attempts when probes saturate the
+    /// per-request cap; ~30 attempts when probes reject quickly
+    /// (TCP-refused / fast 503). Earlier comment claimed "30 attempts"
+    /// unconditionally — that was wrong when the server is slow,
+    /// which is exactly when the probe matters most. M3.24a tightened
+    /// `requestTimeout` from 5→2s to bring the worst case back close
+    /// to the 30-attempt mental model.
     static let interval: TimeInterval = 3
 
-    /// Per-request timeout. The probe URL is on the just-deployed
-    /// server, which may be slow to respond on the very first hit
-    /// (cold start, lazy module load). 5s is well below the 3s poll
-    /// interval's "feel" — we don't want a slow response to delay
-    /// the next attempt past the next polling tick.
-    static let requestTimeout: TimeInterval = 5
+    /// Per-request timeout. Kept BELOW `interval` so a single slow
+    /// probe doesn't push the next attempt past the natural polling
+    /// tick. 2s is enough for any HTTP exchange against a co-located
+    /// PaaS frontend; a server still answering slower than 2s on the
+    /// auth-state path is already in trouble — we'd rather count that
+    /// as a failed probe and try again than burn the 5s and skew the
+    /// iteration cadence.
+    static let requestTimeout: TimeInterval = 2
 
     enum Outcome: Equatable {
         case ready

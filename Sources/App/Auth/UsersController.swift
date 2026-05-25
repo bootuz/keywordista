@@ -100,10 +100,6 @@ struct UsersController {
 
     // MARK: - DELETE /users/:id
 
-    /// Hard-delete a user. FK cascades from M1.3 + M1.4 clean up
-    /// the sessions and the invites they created. Safeguards:
-    ///   • 409 Conflict if target == requester (self-delete)
-    ///   • 409 Conflict if target is the only admin (last-admin)
     func revoke(req: Request) async throws -> Response {
         let targetID = try req.parameters.require("id", as: UUID.self)
         let requester = try req.auth.require(User.self)
@@ -117,8 +113,6 @@ struct UsersController {
             throw Abort(.notFound, reason: "user not found")
         }
 
-        // Last-admin guard: if we're about to delete an admin, make
-        // sure another admin will remain.
         if target.role == .admin {
             let adminCount = try await User.query(on: req.db)
                 .filter(\.$role == .admin)
@@ -145,8 +139,6 @@ struct UsersController {
             throw Abort(.notFound, reason: "user not found")
         }
 
-        // Last-admin guard: if we're demoting an admin to non-admin,
-        // make sure another admin remains.
         if target.role == .admin && newRole != .admin {
             let adminCount = try await User.query(on: req.db)
                 .filter(\.$role == .admin)
@@ -169,9 +161,6 @@ struct UsersController {
     ///   https://kw.example.com/#/invite/<token>
     ///   http://localhost:8080/#/invite/<token>
     func inviteAcceptURL(token: String) -> URL {
-        // Join carefully — URL's appendingPathComponent escapes the
-        // '#' character which would break the hash route. Build the
-        // string manually instead.
         var base = publicBaseURL.absoluteString
         if base.hasSuffix("/") {
             base.removeLast()
@@ -221,10 +210,7 @@ struct InviteCreateRequest: Content {
 
 struct InviteCreatedResponse: Content {
     let id: UUID
-    /// The raw token — shown to the admin ONCE for copy-to-clipboard.
-    /// Future GET endpoints intentionally won't return this.
     let token: String
-    /// Pre-built acceptance URL the admin sends to the recipient.
     let acceptUrl: URL
     let role: String
     let email: String?

@@ -68,10 +68,19 @@ final class DeployFlowCoordinatorTests: XCTestCase {
         func createService(spec: DeploymentSpec, token: String) async throws -> ProviderService {
             try createResult.get()
         }
+        /// M3.24a: deploy-phase tests fill this with the synthetic
+        /// event sequence the stub should yield. Default empty so
+        /// pre-M3.24a tests that didn't exercise the deploy phase
+        /// keep working.
+        var deployEvents: [DeployEvent] = []
         func streamDeployEvents(service: ProviderService, token: String) -> AsyncStream<DeployEvent> {
-            // Minimal — tests of the deploy phase use a separate
-            // hand-driven stream (see testDeploySuccessTransitionsToSuccessPhase).
-            AsyncStream { continuation in
+            // Capture the array by value at stream-creation time so
+            // mid-stream mutations don't race the consumer.
+            let events = deployEvents
+            return AsyncStream { continuation in
+                for event in events {
+                    continuation.yield(event)
+                }
                 continuation.finish()
             }
         }
@@ -357,6 +366,97 @@ final class DeployFlowCoordinatorTests: XCTestCase {
             database: .externalPostgres(connectionURL: "postgres://x")
         )
         XCTAssertEqual(provider.estimateMonthlyCost(spec: extSpec).cents, 700)
+    }
+
+    // ── M3.24a: readiness-probe outcome → phase transition ───────────
+    //
+    // These two tests pin the failure-path contract introduced when
+    // M3.20 added the post-/health probe. Pre-M3.24a, the .cancelled
+    // branch silently returned and left the coordinator stuck on
+    // .deploying forever — a frozen UI with no recovery. The fix
+    // mirrors the .timedOut branch by transitioning to .failed with
+    // a clear FailureContext. We test BOTH paths together because:
+    //
+    //   1. They share the same wiring (readinessProbe → outcome
+    //      switch in transitionToSuccess), so coverage of both
+    //      sanity-checks the switch as a whole.
+    //   2. Treating them symmetrically discourages a future regression
+    //      where one branch is "fixed" by reverting to the silent-
+    //      return pattern.
+
+    @MainActor
+    func testReadinessTimeoutTransitionsToFailedWithDiagnosticReason() async throws {
+        let coord = try await driveToDeployingWith(
+            probeOutcome: .timedOut,
+            providerEvents: [.healthCheckPassed]
+        )
+
+        // Wait for the deploy stream consumer to finish + the
+        // injected probe outcome to drive the transition. With a
+        // synchronous in-process AsyncStream + a synchronous probe
+        // override, this completes in a few microseconds; the
+        // sleep is just to yield the loop.
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(coord.phase, .failed,
+                      ".timedOut from probe must drive phase → .failed")
+        let reason = try XCTUnwrap(coord.failure?.reason)
+        XCTAssertTrue(reason.contains("never answered"),
+                     "failure reason must mention what the probe was waiting for")
+        XCTAssertTrue(reason.contains("provider's deploy logs"),
+                     "failure reason must give the operator a remediation hint")
+        XCTAssertTrue(coord.failure?.retryable == true,
+                     "timeout is retryable — the operator may want to try the same spec again after fixing the cause")
+    }
+
+    @MainActor
+    func testReadinessCancellationTransitionsToFailedNotStuckOnDeploying() async throws {
+        // The founding-bug case for M3.24a. Pre-fix: this test would
+        // observe coord.phase == .deploying forever. Post-fix: .failed
+        // with a clear cancellation message + retryable=false.
+        let coord = try await driveToDeployingWith(
+            probeOutcome: .cancelled,
+            providerEvents: [.healthCheckPassed]
+        )
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(coord.phase, .failed,
+                      ".cancelled from probe must NOT leave the coordinator stuck on .deploying — that's the F1 bug")
+        let reason = try XCTUnwrap(coord.failure?.reason)
+        XCTAssertTrue(reason.lowercased().contains("cancel"),
+                     "failure reason must communicate cancellation, got: \(reason)")
+        XCTAssertEqual(coord.failure?.retryable, false,
+                      "cancellation is operator-initiated stop, not a retryable error")
+    }
+
+    /// Drives a fresh coordinator through pick → auth → configure →
+    /// confirm → deploy, injecting both the readiness-probe outcome
+    /// AND the provider's deploy event stream. Returns the coordinator
+    /// once the stream-consumer task has been started so the caller
+    /// can assert on phase transitions.
+    @MainActor
+    private func driveToDeployingWith(
+        probeOutcome: ReadinessProbe.Outcome,
+        providerEvents: [DeployEvent]
+    ) async throws -> DeployFlowCoordinator {
+        var stub = StubProvider()
+        stub.deployEvents = providerEvents
+
+        let coord = DeployFlowCoordinator(providers: [stub], onCompletion: { _ in })
+
+        // Inject the probe override BEFORE starting the deploy so
+        // the .healthCheckPassed event lands on the right closure.
+        coord.readinessProbe = { _, _ in probeOutcome }
+
+        coord.selectProvider(stub)
+        coord.token = "t"
+        await coord.authenticate()
+        coord.serviceName = "test-service"
+        coord.adminEmail = "ops@studio.local"
+        try coord.proceedToConfirm()
+        await coord.deploy()
+        return coord
     }
 
     // Helper for the cost-math test — minimal spec matching

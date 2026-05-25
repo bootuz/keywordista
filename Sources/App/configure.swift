@@ -126,21 +126,11 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateAppStorefrontAvailability())
     app.migrations.add(CreateChartPositionSnapshot())
     app.migrations.add(CreateChartEvent())
-    // M1 — auth + multi-user tables. Safe to register in both modes:
-    // local-mode boots will create the tables but never insert into
-    // them (auth middleware is server-only). Keeps the migration set
-    // identical across local + server so a `local` install can be
-    // upgraded to `server` later without manual SQL.
     app.migrations.add(CreateUsers())
     app.migrations.add(CreateAuthSessions())
     app.migrations.add(CreateInvites())
-    // ADD COLUMN migrations on existing tables — must run AFTER
-    // CreateUsers because they reference users(id).
     app.migrations.add(AddCreatorUserIdToWatchedApp())
     app.migrations.add(AddCreatorUserIdToKeyword())
-    // M1.9 — Encrypt-at-rest data migration. Constructor takes the
-    // runtime SecretBox so prepare/revert see the same crypto state
-    // as production reads/writes. Idempotent on both directions.
     app.migrations.add(EncryptExistingSecrets(secretBox: secretBox))
 
     try await app.autoMigrate()
@@ -189,12 +179,6 @@ public func configure(_ app: Application) async throws {
         app.logger.info("purged \(purged) expired auth session(s) at boot")
     }
 
-    // Orphan-job sweeper: any job left in 'processing' state at boot is
-    // by definition stranded — the worker that picked it up is gone
-    // (crash, kill -9, sudden shutdown). Mark them completed so the
-    // queue's pending count can drop to 0 and the SPA's refresh chip
-    // clears via its queue-empty safety net. Without this, a single
-    // stranded job permanently wedges the chip until manual DB surgery.
     if let sql = app.db as? any SQLDatabase {
         try await sql.raw("""
         UPDATE _jobs SET state = 'completed'
