@@ -1,3 +1,4 @@
+import Crypto
 import Fluent
 import Foundation
 import Vapor
@@ -341,28 +342,55 @@ struct AuthController {
 
     /// M3.21: timing-safe string equality for the setup token check.
     /// `==` on String short-circuits on the first byte mismatch,
-    /// which leaks token length and prefix to a network attacker
-    /// who can time requests. We compare every byte unconditionally
-    /// — XOR-and-OR the differences so the loop runs the same
-    /// number of cycles regardless of where (or whether) the
-    /// mismatch occurs.
+    /// leaking token length and prefix to a network attacker who
+    /// can time requests.
     ///
-    /// Operates on UTF-8 bytes, not Unicode scalars — tokens are
-    /// ASCII (hex/base64) by convention so this is harmless, and
-    /// it sidesteps Swift String's non-trivial equality semantics
-    /// (canonical equivalence) that could vary in time.
-    private func constantTimeEqual(_ a: String, _ b: String) -> Bool {
-        let lhs = Array(a.utf8)
-        let rhs = Array(b.utf8)
-        // Length mismatch is a fast fail; the attacker learning
-        // token-length is acceptable (16-char min still means
-        // 96+ bits of unknown content).
-        guard lhs.count == rhs.count else { return false }
-        var diff: UInt8 = 0
-        for i in 0..<lhs.count {
-            diff |= lhs[i] ^ rhs[i]
-        }
-        return diff == 0
+    /// **M3.24b — Implementation note.** The original M3.21 impl was
+    /// a hand-rolled XOR-accumulate loop. Swift offers no `volatile`
+    /// and no guarantee that the compiler won't elide a dead-store-
+    /// equivalent accumulation, which made the loop optimization-
+    /// fragile in Release builds (and exactly the kind of thing
+    /// that silently regresses across compiler versions).
+    ///
+    /// This version uses `HMAC<SHA256>.isValidAuthenticationCode`,
+    /// which is documented constant-time and is the standard idiom
+    /// in swift-crypto for exactly this use case. We:
+    ///
+    ///   1. Generate an ephemeral random SymmetricKey per call
+    ///      (256-bit; the per-call key prevents the attacker from
+    ///      precomputing anything across requests).
+    ///   2. Compute HMAC(a) under that key.
+    ///   3. Verify the same HMAC against b under the same key.
+    ///   4. Verification succeeds iff a and b have identical UTF-8
+    ///      byte content (HMAC is collision-resistant; the chance
+    ///      of two different bytes hashing to the same MAC is
+    ///      cryptographically negligible).
+    ///
+    /// Operates on UTF-8 bytes — tokens are ASCII (hex/base64) by
+    /// convention, sidesteps Swift String's canonical equivalence.
+    ///
+    /// **Length-leak posture is unchanged from M3.21.** If lhs/rhs
+    /// are different lengths, both HMACs still get computed (HMAC
+    /// works on arbitrary-length input), so the length difference
+    /// shows up as timing variance in the *HMAC computation step*,
+    /// not in the comparison step. Equivalent to before: 16-char
+    /// minimum keeps the unknown content ≥ ~96 bits even given the
+    /// length.
+    ///
+    /// **Internal access** so `ConstantTimeEqualTests` can target it
+    /// directly via `@testable import`. Pure function, no instance
+    /// state, no I/O — promotion to `static func` would be reasonable
+    /// but the original signature is kept to minimize blast radius.
+    func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+        let aBytes = Array(a.utf8)
+        let bBytes = Array(b.utf8)
+        let key = SymmetricKey(size: .bits256)
+        let aMAC = HMAC<SHA256>.authenticationCode(for: aBytes, using: key)
+        return HMAC<SHA256>.isValidAuthenticationCode(
+            aMAC,
+            authenticating: bBytes,
+            using: key
+        )
     }
 
     // MARK: - Session issuance helper
