@@ -133,6 +133,12 @@ jobs:
         # proves the Swift compiles + links.
         run: swift build
 
+      - name: swift test
+        # Pure-function regression guards (e.g. ServiceSupervisorEnvTests
+        # pins the v0.3.5 spawn-env bug shut). No process launches, no
+        # network, no real backend — those stay in the release pipeline.
+        run: swift test
+
   image-size:
     name: Server image (build + size gate)
     # Builds the Dockerfile on every PR — same as release-image.yml does,

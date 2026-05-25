@@ -20,7 +20,7 @@ help:
 	@echo "  make docker-smoke  — docker-build + run, hit /health, tear down"
 
 dev-backend:
-	swift run
+	KEYWORDISTA_MODE=local swift run
 
 dev-web:
 	cd web && npm run dev

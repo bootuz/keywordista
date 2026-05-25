@@ -97,6 +97,23 @@ public func configure(_ app: Application) async throws {
     let database = try DatabaseProvider.resolve(from: manifest)
     try database.register(on: app)
     try await database.applyDriverSpecificTuning(on: app)
+    // Stash the resolved provider so BackupController (M1.11) can
+    // ask "am I SQLite or Postgres?" without re-resolving from the
+    // manifest. Same pattern as app.secretBox.
+    app.databaseProvider = database
+
+    // Encryption-at-rest (M1.9). Resolve the runtime SecretBox once
+    // here so the M1.9 migration AND every per-request SettingsService
+    // construction share the same key. In local mode the key derives
+    // from IOPlatformUUID (deterministic across boots on the same
+    // Mac); in server mode it comes from KEYWORDISTA_ENCRYPTION_KEY
+    // (manifest already validated required-in-server-mode).
+    let encryptionKey = try EncryptionKeyResolver.resolve(
+        mode: manifest.mode,
+        explicit: try manifest.optional(EnvVars.encryptionKey)
+    )
+    let secretBox = SecretBox(key: encryptionKey)
+    app.secretBox = secretBox
 
     app.migrations.add(CreateWatchedApp())
     app.migrations.add(CreateKeyword())
@@ -109,8 +126,68 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateAppStorefrontAvailability())
     app.migrations.add(CreateChartPositionSnapshot())
     app.migrations.add(CreateChartEvent())
+    // M1 — auth + multi-user tables. Safe to register in both modes:
+    // local-mode boots will create the tables but never insert into
+    // them (auth middleware is server-only). Keeps the migration set
+    // identical across local + server so a `local` install can be
+    // upgraded to `server` later without manual SQL.
+    app.migrations.add(CreateUsers())
+    app.migrations.add(CreateAuthSessions())
+    app.migrations.add(CreateInvites())
+    // ADD COLUMN migrations on existing tables — must run AFTER
+    // CreateUsers because they reference users(id).
+    app.migrations.add(AddCreatorUserIdToWatchedApp())
+    app.migrations.add(AddCreatorUserIdToKeyword())
+    // M1.9 — Encrypt-at-rest data migration. Constructor takes the
+    // runtime SecretBox so prepare/revert see the same crypto state
+    // as production reads/writes. Idempotent on both directions.
+    app.migrations.add(EncryptExistingSecrets(secretBox: secretBox))
 
     try await app.autoMigrate()
+
+    // ── Admin bootstrap (closes the auth-takeover hole) ──────────────
+    //
+    // CRITICAL ORDERING: this MUST run before routes() so the HTTP
+    // server can't start accepting /api/v1/auth/setup requests until
+    // either:
+    //   (a) the cockpit-supplied admin user is seeded, OR
+    //   (b) we've logged that no env-var admin was supplied (raw
+    //       docker run, the operator will use the in-browser wizard).
+    //
+    // Without this, cockpit-deployed instances on predictable
+    // *.onrender.com subdomains leave /setup open during the boot
+    // window — any visitor claims admin. See AdminBootstrap.swift
+    // for the full security rationale.
+    let bootstrapOutcome = try await AdminBootstrap.run(
+        manifest: manifest,
+        on: app.db,
+        logger: app.logger
+    )
+    // Log every outcome at info+ for ops visibility — the security
+    // story is "this deployment's first-run posture is X."
+    switch bootstrapOutcome {
+    case .seeded:
+        break   // AdminBootstrap.run already logged at .notice
+    case .alreadyHasUsers:
+        app.logger.info("admin bootstrap skipped: users table not empty")
+    case .envVarsNotProvided:
+        app.logger.info("""
+            admin bootstrap skipped: KEYWORDISTA_ADMIN_EMAIL / \
+            KEYWORDISTA_ADMIN_PASSWORD_HASH not set. First visitor to \
+            /api/v1/auth/setup will claim admin — restrict access via \
+            CDN/VPN until you complete first-run setup.
+            """)
+    }
+
+    // Boot-time auth-session sweep: DELETE rows whose expiresAt has
+    // already passed. In local mode this is a no-op (no sessions
+    // ever created); in server mode it keeps the table from growing
+    // unbounded with abandoned sessions from forgotten devices.
+    // Logged at info level for ops visibility on real deployments.
+    let purged = try await AuthSession.purgeExpired(on: app.db)
+    if purged > 0 {
+        app.logger.info("purged \(purged) expired auth session(s) at boot")
+    }
 
     // Orphan-job sweeper: any job left in 'processing' state at boot is
     // by definition stranded — the worker that picked it up is gone
@@ -149,5 +226,5 @@ public func configure(_ app: Application) async throws {
     try app.queues.startInProcessJobs(on: .default)
     try app.queues.startScheduledJobs()
 
-    try routes(app)
+    try routes(app, manifest: manifest)
 }

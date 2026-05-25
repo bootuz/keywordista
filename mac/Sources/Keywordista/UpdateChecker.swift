@@ -106,7 +106,7 @@ final class UpdateChecker: ObservableObject {
             return
         }
 
-        if compareSemver(latest.version, currentVersion) == .orderedDescending {
+        if Self.compareSemver(latest.version, currentVersion) == .orderedDescending {
             status = .available(version: latest.version, downloadURL: latest.downloadURL)
         } else {
             // No newer version. Reset .checking → .idle, but don't
@@ -173,7 +173,10 @@ final class UpdateChecker: ObservableObject {
 
     // MARK: - Implementation details
 
-    private struct Release: Equatable {
+    /// Resolved release that the menubar's "Apply Update" can act on.
+    /// Made `internal` so tests can assert on the picked candidate;
+    /// production usage stays inside UpdateChecker.
+    struct Release: Equatable {
         let version: String
         let downloadURL: URL
     }
@@ -194,28 +197,65 @@ final class UpdateChecker: ObservableObject {
 
             let (data, _) = try await URLSession.shared.data(for: req)
             let releases = try JSONDecoder().decode([GitHubRelease].self, from: data)
-
-            let candidates: [Release] = releases.compactMap { release in
-                guard release.tagName.hasPrefix("service-v") else { return nil }
-                let version = String(release.tagName.dropFirst("service-v".count))
-                guard let asset = release.assets.first(where: { $0.name.hasSuffix(".zip") }),
-                      let assetURL = URL(string: asset.browserDownloadURL) else {
-                    return nil
-                }
-                return Release(version: version, downloadURL: assetURL)
-            }
-
-            return candidates.max { compareSemver($0.version, $1.version) == .orderedAscending }
+            return Self.pickLatestStableRelease(from: releases)
         } catch {
             return nil
         }
     }
 
-    private struct GitHubRelease: Codable {
+    /// Pure-function half of fetchLatestServiceRelease — the part the
+    /// unit tests can exercise without HTTP. Filters out:
+    ///   • Pre-releases (the M3.18 fix — beta/rc/alpha tags must NOT
+    ///     auto-prompt stable users)
+    ///   • Releases without the `service-v` prefix (app-v* / image-v*
+    ///     belong to the other release streams; ignore them)
+    ///   • Releases without a .zip asset (incomplete uploads etc.)
+    /// Returns the highest-version remaining candidate, or nil if
+    /// nothing qualifies.
+    ///
+    /// `nonisolated` because pure functions don't need MainActor; the
+    /// class-level @MainActor would otherwise make this only callable
+    /// from MainActor contexts (including tests).
+    nonisolated static func pickLatestStableRelease(from releases: [GitHubRelease]) -> Release? {
+        let candidates: [Release] = releases.compactMap { release in
+            // M3.18: prerelease filter. Trust GitHub's explicit flag
+            // (set by release-{service,app}.yml workflows when the
+            // tag contains '-'). Without this, stable users on v0.4.x
+            // would be prompted to "upgrade" to v0.5.0-beta1 the
+            // moment we tagged it.
+            guard !release.prerelease else { return nil }
+            guard release.tagName.hasPrefix("service-v") else { return nil }
+            let version = String(release.tagName.dropFirst("service-v".count))
+            guard let asset = release.assets.first(where: { $0.name.hasSuffix(".zip") }),
+                  let assetURL = URL(string: asset.browserDownloadURL) else {
+                return nil
+            }
+            return Release(version: version, downloadURL: assetURL)
+        }
+        return candidates.max { Self.compareSemver($0.version, $1.version) == .orderedAscending }
+    }
+
+    /// Decoded shape of one entry in GitHub's /repos/.../releases response.
+    /// Made `internal` (not private) so unit tests can construct fixtures
+    /// + exercise the prerelease-filter logic without standing up a real
+    /// HTTP server. The fields are exactly what `pickLatestStableRelease`
+    /// reads — adding more would risk decode failures on schema changes
+    /// we don't care about.
+    struct GitHubRelease: Codable, Equatable {
         let tagName: String
+        /// GitHub's per-release "this is a pre-release" flag, set by
+        /// `gh release create --prerelease` (or the workflow file's
+        /// equivalent conditional). M3.18's filter trusts THIS over
+        /// any version-string heuristic — explicit flag beats
+        /// guessing from a "-beta" suffix.
+        let prerelease: Bool
         let assets: [Asset]
-        enum CodingKeys: String, CodingKey { case tagName = "tag_name", assets }
-        struct Asset: Codable {
+        enum CodingKeys: String, CodingKey {
+            case tagName = "tag_name"
+            case prerelease
+            case assets
+        }
+        struct Asset: Codable, Equatable {
             let name: String
             let browserDownloadURL: String
             enum CodingKeys: String, CodingKey { case name, browserDownloadURL = "browser_download_url" }
@@ -350,9 +390,11 @@ final class UpdateChecker: ObservableObject {
     // MARK: - Semver
 
     /// Lightweight MAJOR.MINOR.PATCH comparator. Doesn't handle prerelease
-    /// or build-metadata tags — we don't publish them, so the full SemVer
-    /// spec would be overkill.
-    private func compareSemver(_ a: String, _ b: String) -> ComparisonResult {
+    /// or build-metadata tags — we filter those out at the pickLatestStableRelease
+    /// step (M3.18), so by the time we get here the inputs are clean SemVer.
+    /// `nonisolated static` for the same reason pickLatestStableRelease is —
+    /// pure function, doesn't need MainActor.
+    nonisolated static func compareSemver(_ a: String, _ b: String) -> ComparisonResult {
         let aParts = a.split(separator: ".").compactMap { Int($0) }
         let bParts = b.split(separator: ".").compactMap { Int($0) }
         for i in 0..<max(aParts.count, bParts.count) {

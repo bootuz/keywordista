@@ -223,11 +223,24 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
+          # M3.18: pre-release detection. Any SemVer pre-release marker
+          # (-beta1, -rc.2, -alpha, etc.) flags the GitHub release as
+          # pre-release. Without this, even "service-v0.5.0-beta1"
+          # would be marked "Latest" and UpdateChecker.swift's
+          # M3.18 filter — which trusts release.prerelease — would
+          # incorrectly auto-prompt stable users.
+          PRERELEASE_FLAG=""
+          VERSION="${TAG#service-v}"
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+            echo "→ tag '$TAG' has a pre-release suffix; marking GitHub release as pre-release"
+          fi
           gh release create "$TAG" \
             "${{ steps.pkg.outputs.zip }}" \
             "${{ steps.pkg.outputs.zip }}.sha256" \
             --title "Service ${{ steps.version.outputs.version }}" \
             --generate-notes \
+            $PRERELEASE_FLAG \
             --notes "$(cat <<EOF
           Notarized service payload for the Keywordista menubar app's in-app updater.
 

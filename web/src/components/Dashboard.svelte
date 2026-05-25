@@ -29,6 +29,14 @@
   import ChartsPage from './ChartsPage.svelte';
   import { chartEvents, lastVisited, startChartEventPoll } from '../lib/chartEvents';
   import type { DashboardRow as Row } from '../lib/types';
+  // Auth UI (M2.9): in server mode the header shows the signed-in
+  // user's email + a logout button. Both gated on serverMode so
+  // local-mode dashboards stay byte-identical to the pre-M2 UX.
+  import { push } from 'svelte-spa-router';
+  import { logout } from '../lib/auth';
+  import { clearAuthState } from '../lib/authStore';
+  import { currentUser, serverMode } from '../lib/authStore';
+  import { ROUTES } from '../lib/router';
 
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -37,6 +45,22 @@
   let showSettings = $state(false);
   let showCharts = $state(false);
   let historyTarget = $state<Row | null>(null);
+
+  let loggingOut = $state(false);
+  async function handleLogout() {
+    if (loggingOut) return;
+    loggingOut = true;
+    try {
+      await logout();
+    } catch {
+      // Logout's idempotent server-side; even on network error the
+      // user expects local state to clear. Fall through.
+    } finally {
+      await clearAuthState();
+      push(ROUTES.login);
+      loggingOut = false;
+    }
+  }
 
   // Unread chart events for the toolbar badge: count of events created after
   // the last time the user opened the Charts page. Visible badge nudges them
@@ -224,6 +248,17 @@
             </span>
           {/if}
         </button>
+        {#if $serverMode && $currentUser}
+          <button
+            onclick={handleLogout}
+            disabled={loggingOut}
+            title="Sign out as {$currentUser.email}"
+            aria-label="Sign out"
+            class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-60"
+          >
+            {loggingOut ? 'Signing out…' : 'Sign out'}
+          </button>
+        {/if}
         <button
           onclick={() => (showSettings = true)}
           title="Settings"

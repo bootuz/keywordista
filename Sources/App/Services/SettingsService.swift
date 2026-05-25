@@ -66,10 +66,16 @@ protocol SettingsServiceProtocol: Sendable {
 struct SettingsService: SettingsServiceProtocol {
     let repository: any SettingsRepositoryProtocol
 
+    /// Encryption-at-rest for credential-shaped values (M1.9). Wraps
+    /// asc.privateKey + asa.clientSecret transparently on write,
+    /// unwraps on read. Plain-shaped keys (asc.keyId, asa.clientId,
+    /// asa.orgId, asc.issuerId) bypass it — they're not secrets.
+    let secretBox: SecretBox
+
     // ── Key names ────────────────────────────────────────────────────────────
     // String constants live here (not at file scope) so the only place that
     // knows about storage key names is the service.
-    private enum Keys {
+    enum Keys {
         static let ascKeyId = "asc.keyId"
         static let ascIssuerId = "asc.issuerId"
         static let ascPrivateKey = "asc.privateKey"
@@ -79,12 +85,23 @@ struct SettingsService: SettingsServiceProtocol {
 
         static let asc = [ascKeyId, ascIssuerId, ascPrivateKey]
         static let asa = [asaClientId, asaClientSecret, asaOrgId]
+
+        /// The subset of storage keys whose values are credential-
+        /// shaped and must be encrypted at rest. The M1.9 migration
+        /// reads from this same list so it normalizes exactly the
+        /// rows the service would write encrypted.
+        static let secretShaped: Set<String> = [
+            ascPrivateKey,
+            asaClientSecret,
+        ]
     }
 
     // ── ASC ──────────────────────────────────────────────────────────────────
 
     func getASCStatus() async throws -> ASCStatus {
         let values = try await repository.getMany(keys: Keys.asc)
+        // hasPrivateKey is a "row exists and non-empty" check — we
+        // don't need to decrypt the value just to know it's present.
         return ASCStatus(
             keyId: values[Keys.ascKeyId],
             issuerId: values[Keys.ascIssuerId],
@@ -97,15 +114,19 @@ struct SettingsService: SettingsServiceProtocol {
         guard
             let keyId = values[Keys.ascKeyId], !keyId.isEmpty,
             let issuerId = values[Keys.ascIssuerId], !issuerId.isEmpty,
-            let privateKey = values[Keys.ascPrivateKey], !privateKey.isEmpty
+            let storedKey = values[Keys.ascPrivateKey], !storedKey.isEmpty
         else { return nil }
+        // M1.9 envelope unwrap: legacy plaintext rows pass through
+        // unchanged (see SecretEnvelope.unwrap header for why).
+        let privateKey = try SecretEnvelope.unwrap(storedKey, with: secretBox)
         return ASCCredentials(keyId: keyId, issuerId: issuerId, privateKey: privateKey)
     }
 
     func setASCCredentials(_ creds: ASCCredentials) async throws {
         try await repository.set(Keys.ascKeyId, value: creds.keyId)
         try await repository.set(Keys.ascIssuerId, value: creds.issuerId)
-        try await repository.set(Keys.ascPrivateKey, value: creds.privateKey)
+        let sealed = try SecretEnvelope.wrap(creds.privateKey, with: secretBox)
+        try await repository.set(Keys.ascPrivateKey, value: sealed)
     }
 
     func clearASCCredentials() async throws {
@@ -127,8 +148,11 @@ struct SettingsService: SettingsServiceProtocol {
         let values = try await repository.getMany(keys: Keys.asa)
         guard
             let clientId = values[Keys.asaClientId], !clientId.isEmpty,
-            let clientSecret = values[Keys.asaClientSecret], !clientSecret.isEmpty
+            let storedSecret = values[Keys.asaClientSecret], !storedSecret.isEmpty
         else { return nil }
+        // M1.9 envelope unwrap — same legacy-plaintext pass-through
+        // as the ASC path.
+        let clientSecret = try SecretEnvelope.unwrap(storedSecret, with: secretBox)
         return ASACredentials(
             clientId: clientId,
             clientSecret: clientSecret,
@@ -138,7 +162,8 @@ struct SettingsService: SettingsServiceProtocol {
 
     func setASACredentials(_ creds: ASACredentials) async throws {
         try await repository.set(Keys.asaClientId, value: creds.clientId)
-        try await repository.set(Keys.asaClientSecret, value: creds.clientSecret)
+        let sealed = try SecretEnvelope.wrap(creds.clientSecret, with: secretBox)
+        try await repository.set(Keys.asaClientSecret, value: sealed)
         if let orgId = creds.orgId, !orgId.isEmpty {
             try await repository.set(Keys.asaOrgId, value: orgId)
         } else {

@@ -16,6 +16,16 @@ let package = Package(
         .executableTarget(
             name: "Keywordista",
             path: "Sources/Keywordista"
-        )
+        ),
+        // Unit tests for the menubar app. Scoped to pure-function regression
+        // guards (the v0.3.5 spawn-env bug being the founding case) — full
+        // end-to-end "launch the supervisor against a real server binary"
+        // integration testing is a release-pipeline concern, not a CI unit
+        // job. Keep this target small and fast.
+        .testTarget(
+            name: "KeywordistaTests",
+            dependencies: ["Keywordista"],
+            path: "Tests/KeywordistaTests"
+        ),
     ]
 )

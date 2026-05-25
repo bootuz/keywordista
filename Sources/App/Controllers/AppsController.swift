@@ -19,9 +19,16 @@ struct AppsController: RouteCollection {
 
     @Sendable func create(req: Request) async throws -> WatchedApp {
         let payload = try req.content.decode(CreatePayload.self)
+        // M1.10 auth attribution: in server mode AuthMiddleware has
+        // logged the user in by now; in local mode req.auth is empty
+        // and `.get(User.self)?.id` returns nil — both correct, since
+        // WatchedApp.creator is @OptionalParent (NULL = pre-auth /
+        // system-created / local mode).
+        let creatorID = req.auth.get(User.self)?.id
         let app = try await req.appService().create(
             appStoreId: payload.appStoreId,
-            lookupCountry: payload.lookupCountry ?? "us"
+            lookupCountry: payload.lookupCountry ?? "us",
+            creatorID: creatorID
         )
         // Kick off the 175-storefront availability probe in the background so
         // the chart-watchdog has a narrowed sweep target on its next pass.

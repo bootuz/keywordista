@@ -78,10 +78,11 @@ final class ServiceSupervisor: ObservableObject {
             "--hostname", "127.0.0.1",
             "--port", "\(chosenPort)",
         ]
-        var env = ProcessInfo.processInfo.environment
-        env["KEYWORDISTA_PUBLIC_DIR"] = publicDir.path
-        env["DATABASE_PATH"] = dbPath
-        process.environment = env
+        process.environment = Self.makeChildEnvironment(
+            base: ProcessInfo.processInfo.environment,
+            publicDir: publicDir,
+            dbPath: dbPath
+        )
 
         // Pipe stdout/stderr to log files so the user (or we) can grep them
         // when something goes sideways. Console.app opens them happily.
@@ -136,6 +137,39 @@ final class ServiceSupervisor: ObservableObject {
         }
         self.process = nil
         status = .stopped
+    }
+
+    // MARK: - Child-process environment
+    //
+    // Built from a pure static function so the regression test can exercise
+    // it without launching a real process. The contract the test pins:
+    //
+    //   • KEYWORDISTA_MODE is ALWAYS "local". Without this the spawned
+    //     backend defaults to server mode (per the v1 image-as-product
+    //     contract — the Docker image sets =server explicitly via ENV)
+    //     and crashes on boot demanding KEYWORDISTA_ENCRYPTION_KEY. This
+    //     was the v0.3.5 regression.
+    //   • Our three overrides win over anything inherited from the parent
+    //     env (Dictionary assignment overwrites). A contributor who has
+    //     KEYWORDISTA_MODE=server in their shell rc still gets a working
+    //     local backend.
+    //   • All other inherited env passes through unchanged — needed for
+    //     PATH, HOME, the dynamic-linker vars Swift needs at runtime, etc.
+
+    // `nonisolated` because this is a pure function — touches no
+    // instance state, takes everything via parameters. Lets the test
+    // suite call it without a MainActor hop and without forcing every
+    // test case to be @MainActor.
+    nonisolated static func makeChildEnvironment(
+        base: [String: String],
+        publicDir: URL,
+        dbPath: String
+    ) -> [String: String] {
+        var env = base
+        env["KEYWORDISTA_MODE"] = "local"
+        env["KEYWORDISTA_PUBLIC_DIR"] = publicDir.path
+        env["DATABASE_PATH"] = dbPath
+        return env
     }
 
     // MARK: - Binary / public-dir resolution

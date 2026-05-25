@@ -30,8 +30,14 @@ struct KeywordsController: RouteCollection {
 
     @Sendable func create(req: Request) async throws -> Keyword {
         let payload = try req.content.decode(CreatePayload.self)
+        // M1.10 auth attribution — see AppsController.create.
+        let creatorID = req.auth.get(User.self)?.id
         do {
-            return try await req.keywordService().create(term: payload.term, countryCode: payload.countryCode)
+            return try await req.keywordService().create(
+                term: payload.term,
+                countryCode: payload.countryCode,
+                creatorID: creatorID
+            )
         } catch KeywordServiceError.emptyTerm {
             throw Abort(.badRequest, reason: "term empty")
         } catch KeywordServiceError.invalidCountryCode {

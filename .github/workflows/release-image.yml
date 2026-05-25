@@ -15,11 +15,20 @@ name: Release Image
 #                              :latest  (always the newest stable)
 #                              @sha256:<digest>  (immutable, cockpit pins this)
 #
-# Architecture: linux/amd64 + linux/arm64. Native amd64 build on
-# ubuntu-latest, arm64 cross-built via QEMU emulation (slow but
-# reliable; matches what most projects ship).
+# Architecture: linux/amd64 + linux/arm64. **Native parallel builds**:
+# amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm (free public-repo
+# native ARM runners, released by GitHub in 2024). Before this M3.15
+# refactor, the arm64 variant was QEMU-emulated on the amd64 runner,
+# making first-time builds ~30-45 min; native builds drop that to
+# ~8-12 min and cached subsequent builds to ~3-5 min.
 #
-# Supply chain:
+# Workflow shape:
+#   build  (matrix: amd64 + arm64) → pushes per-arch digests
+#   manifest                       → combines digests into multi-arch
+#                                    manifest, cosign-signs the result,
+#                                    attaches SLSA-3 provenance
+#
+# Supply chain (unchanged from M0.8):
 #   • cosign --keyless: signs the resulting manifest using the
 #     workflow's GitHub OIDC identity. Verifiable later with
 #     `cosign verify ghcr.io/.../keywordista:<tag>
@@ -63,19 +72,36 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/keywordista
 
 jobs:
-  build-push-sign:
-    name: Build, push, sign, attest
-    runs-on: ubuntu-latest
+  # ── Stage 1: per-arch builds in parallel on native runners ──────────
+  #
+  # Each runs `docker buildx build` for ONE platform with
+  # `outputs: type=image,push-by-digest=true,name-canonical=true,push=true`
+  # — that pushes the per-arch image to the registry under the
+  # repository's digest WITHOUT applying any tags. We then save the
+  # digest as a file artifact so the manifest job can find them all.
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            # Free native ARM64 runner for public repos, released by
+            # GitHub in 2024. No QEMU emulation; Swift release builds
+            # in ~10 min instead of ~40.
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
-      # QEMU lets the amd64 runner build the arm64 variant. Slow (~3-5×
-      # native), but it's the standard pattern and runs in CI minutes
-      # we'd otherwise pay for an arm64 self-hosted runner.
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
+      - name: Prepare platform pair
+        # We need the platform as a slash-free string for the artifact
+        # name ("linux-amd64", not "linux/amd64").
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -84,25 +110,16 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          # The workflow's built-in token has packages:write because of
-          # the permissions block above; no PAT needed.
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derives every tag form (:semver, :major.minor, :major, :latest)
-      # from the pushed git tag. Strips the leading 'image-v' so
-      # 'image-v1.2.3' becomes the docker tag '1.2.3'.
-      - name: Compute image tags
+      # Same labels as M0.8's metadata step, but without per-platform
+      # tags (the manifest job applies those after combining digests).
+      - name: Extract labels
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=match,pattern=image-v(.*),group=1
-            type=match,pattern=image-v(\d+\.\d+)\..*,group=1
-            type=match,pattern=image-v(\d+)\..*,group=1
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/image-v') }}
-            type=raw,value=dryrun-${{ github.sha }},enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
             org.opencontainers.image.title=Keywordista
             org.opencontainers.image.description=Self-hosted App Store keyword tracker for indie iOS devs
@@ -110,9 +127,6 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
 
-      # Compute the build args ImageMetadata.swift reads at runtime.
-      # KEYWORDISTA_BUILD_VERSION = the SemVer extracted from the tag
-      # ('image-v1.2.3' → '1.2.3'); empty for dry runs.
       - name: Compute build args
         id: buildargs
         run: |
@@ -128,73 +142,150 @@ jobs:
             echo "commit_sha=${GITHUB_SHA::7}"
             echo "build_date=$BUILD_DATE"
           } >> "$GITHUB_OUTPUT"
-          echo "→ Building keywordista $VERSION (${GITHUB_SHA::7}) at $BUILD_DATE"
 
-      - name: Build and push (multi-arch)
+      - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             KEYWORDISTA_BUILD_VERSION=${{ steps.buildargs.outputs.version }}
             KEYWORDISTA_BUILD_COMMIT_SHA=${{ steps.buildargs.outputs.commit_sha }}
             KEYWORDISTA_BUILD_DATE=${{ steps.buildargs.outputs.build_date }}
-          # Provenance + SBOM attached to the registry image. (SBOM is
-          # cheap; the cockpit may surface it later in the deployment
-          # detail view.)
-          provenance: mode=max
-          sbom: true
-          # Aggressive layer caching — first run is full build, every
-          # subsequent run is a Swift-source-diff away from instant.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # push-by-digest=true means "push the per-arch image to the
+          # registry but DON'T tag it" — the manifest job creates the
+          # tagged multi-arch manifest pointing at these digests.
+          outputs: |
+            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          # Per-arch GHA cache scopes — amd64 + arm64 don't share
+          # layers, so separate scopes prevent contention. Cache
+          # writes from the previous arch's build don't help this one.
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
 
-      # Cosign keyless: signs the published manifest using the workflow
-      # run's OIDC identity. No secrets to manage; verification is
-      # against the GitHub OIDC issuer + this repo's identity claim.
+      # Save the digest as a file so the manifest job can read it.
+      # Artifact name is per-arch so they don't clobber each other.
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── Stage 2: combine per-arch digests into the tagged manifest ──────
+  #
+  # `docker buildx imagetools create -t <full-tag> <reg>@<digest1> <reg>@<digest2>`
+  # creates the multi-arch manifest list. Cosign signs the resulting
+  # manifest digest; SLSA-3 attestation attaches to it.
+  manifest:
+    name: Combine, sign, attest
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same tag-derivation rules as before, but now applied to the
+      # combined manifest rather than to each per-arch build.
+      - name: Compute manifest tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=match,pattern=image-v(.*),group=1
+            type=match,pattern=image-v(\d+\.\d+)\..*,group=1
+            type=match,pattern=image-v(\d+)\..*,group=1
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/image-v') }}
+            type=raw,value=dryrun-${{ github.sha }},enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Create multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          # `printf` builds the per-tag -t flags; xargs feeds the
+          # digest list at the end. The digest filenames are the
+          # sha256 part (we touched files named "abc123..." in build).
+          tag_args=$(printf -- '-t %s ' $(echo '${{ steps.meta.outputs.tags }}'))
+          digest_args=$(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          docker buildx imagetools create $tag_args $digest_args
+
+      - name: Resolve combined manifest digest
+        id: digest
+        run: |
+          set -euo pipefail
+          # Use one of the published tags to look up the manifest list
+          # digest — they all point at the same multi-arch index.
+          # `steps.meta.outputs.tags` is a NEWLINE-separated list (one
+          # ref per line); we grab the first line. Previously this used
+          # `awk '{print $1}'` which prints the first field of EACH line,
+          # producing a multi-line string that `imagetools inspect`
+          # rejected as "invalid reference format." Caught in the M3.15
+          # first run.
+          first_tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+          digest=$(docker buildx imagetools inspect "$first_tag" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "→ Combined manifest digest: $digest"
+
+      # ── Cosign + SLSA (unchanged from M0.8) ────────────────────────
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
         with:
           cosign-release: 'v2.4.1'
 
-      - name: Sign the published manifest
+      - name: Sign each published tag at the manifest digest
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
-          # Sign each :tag → digest pair we published. cosign --yes
-          # skips the interactive confirmation that breaks CI.
           for tag in $TAGS; do
             echo "→ Signing $tag (@$DIGEST)"
             cosign sign --yes "${tag}@${DIGEST}"
           done
 
-      # SLSA-3 provenance: "this image was built by this workflow run
-      # from this commit at this time, using this Dockerfile, with
-      # these build args." Verifiable with the slsa-verifier tool or
-      # cosign verify-attestation.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
           push-to-registry: true
 
       - name: Summary
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {
-            echo "## ✓ Image published"
+            echo "## ✓ Multi-arch image published"
             echo ""
-            echo "**Digest:** \`$DIGEST\`"
+            echo "**Combined manifest digest:** \`$DIGEST\`"
+            echo ""
+            echo "**Architectures:** linux/amd64, linux/arm64 (both native, no QEMU)"
             echo ""
             echo "**Tags:**"
             for tag in $TAGS; do
