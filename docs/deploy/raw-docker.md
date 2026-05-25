@@ -57,7 +57,7 @@ Everything else has sensible defaults — see
 
 ## What's optional but recommended
 
-Pre-bake the admin user to skip the in-browser setup wizard:
+### Pre-bake the admin user (skip the browser setup wizard)
 
 ```bash
 # Hash a password locally — never put plaintext in env vars.
@@ -75,6 +75,47 @@ docker run -d \
 
 Now the very first request to `/` lands on the login page, not the
 setup wizard.
+
+### Gate the setup wizard with a one-time token
+
+If you can't or don't want to pre-bake admin credentials, set
+`KEYWORDISTA_SETUP_TOKEN` instead. The setup wizard then requires
+the token before it'll create the first user — closing the
+takeover window between "deploy goes live" and "you click Submit
+in the browser."
+
+Without this, a scanner that finds your fresh deploy URL during
+the boot window can claim the admin account. The token shuts that
+attack down at the cost of one extra paste during setup.
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+echo "Save this: $TOKEN"   # you'll paste it into the setup wizard
+
+docker run -d \
+  --name keywordista \
+  -p 8080:8080 \
+  -v keywordista-data:/data \
+  -e KEYWORDISTA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
+  -e KEYWORDISTA_PUBLIC_BASE_URL=https://kw.example.com \
+  -e KEYWORDISTA_SETUP_TOKEN="$TOKEN" \
+  ghcr.io/bootuz/keywordista:latest
+```
+
+When you visit the deploy URL, the setup wizard renders an extra
+"Setup token" field. Paste in `$TOKEN` and proceed. The token is
+inert the moment any user exists (subsequent /setup requests
+return 401 even with the token; the API surface is `/login` only).
+
+The token must be **at least 16 characters**; we recommend the
+`openssl rand -hex 32` shape above (256 bits of entropy from a
+CSPRNG). Comparison is constant-time on the server side, so an
+attacker watching response times learns nothing useful about
+partial matches.
+
+If you also set `KEYWORDISTA_ADMIN_*` you don't need this — the
+admin user is pre-seeded, /setup returns 410 to everyone forever.
+Pick one approach.
 
 ---
 

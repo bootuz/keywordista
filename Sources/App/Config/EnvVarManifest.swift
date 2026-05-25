@@ -421,6 +421,24 @@ public enum EnvVars {
         parse: Parsers.bcryptHash
     )
 
+    public static let setupToken = EnvVar<String>(
+        name: "KEYWORDISTA_SETUP_TOKEN",
+        description: "Defense-in-depth for raw-docker-run users who can't pre-seed an admin via KEYWORDISTA_ADMIN_*. When set, POST /api/v1/auth/setup requires the matching value in the X-Keywordista-Setup-Token header — closes the takeover window between deploy and first-run for operators who don't use the cockpit's pre-baked-credentials path. Generate with `openssl rand -hex 32`. Inert once any user exists (setup returns 410 then anyway).",
+        valueIsSecret: true,
+        defaults: { _ in nil },
+        defaultDescription: { _ in nil },
+        parse: { raw in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Min 16 chars ≈ 96 bits of entropy from hex/base64. Below that
+            // a network attacker could brute-force during the boot window.
+            // No max — operators may paste a password-manager string.
+            guard trimmed.count >= 16 else {
+                throw ParseError("must be at least 16 characters (recommend `openssl rand -hex 32`)")
+            }
+            return trimmed
+        }
+    )
+
     // ── Sign-up & auth policy ───────────────────────────────────
 
     public static let openSignup = EnvVar<Bool>(
@@ -538,7 +556,7 @@ public enum EnvVars {
         dataDir, databaseURL, databasePath,
         encryptionKey,
         publicBaseURL, publicDir,
-        adminEmail, adminPasswordHash,
+        adminEmail, adminPasswordHash, setupToken,
         openSignup, sessionTTLDays, inviteTTLDays, bcryptCost,
         trustProxy, rateLimitAuthPer15Min,
         logLevel, logFormat,

@@ -11,7 +11,7 @@
 
   import { push } from 'svelte-spa-router';
   import { setupAdmin } from '../lib/auth';
-  import { hydrateAuthState } from '../lib/authStore';
+  import { authState, hydrateAuthState } from '../lib/authStore';
   import { ApiError } from '../lib/api';
   import { ROUTES } from '../lib/router';
 
@@ -23,8 +23,15 @@
   let email = $state('');
   let password = $state('');
   let confirmPassword = $state('');
+  // M3.21: when KEYWORDISTA_SETUP_TOKEN is configured server-side,
+  // the SPA learns it via authState.setupTokenRequired and must
+  // collect + send the value in X-Keywordista-Setup-Token. The
+  // operator copies it from their docker run env or password manager.
+  let setupToken = $state('');
   let busy = $state(false);
   let error = $state<string | null>(null);
+
+  const tokenRequired = $derived($authState?.setupTokenRequired ?? false);
 
   // Live mismatch indicator without nagging — only fires once the
   // user has actually started typing the confirmation.
@@ -39,7 +46,12 @@
     && passwordLongEnough
     && passwordsMatch
     && password === confirmPassword
-    && confirmPassword.length > 0,
+    && confirmPassword.length > 0
+    // M3.21: if the deploy was booted with a setup token, the
+    // operator must provide it before we can even attempt the
+    // request. Server min-length is 16; we mirror that to give
+    // immediate feedback instead of a round-trip.
+    && (!tokenRequired || setupToken.trim().length >= 16),
   );
 
   async function handleSubmit(event: SubmitEvent) {
@@ -49,7 +61,11 @@
     error = null;
 
     try {
-      await setupAdmin(email.trim(), password);
+      await setupAdmin(
+        email.trim(),
+        password,
+        tokenRequired ? setupToken.trim() : undefined,
+      );
       await hydrateAuthState();
       push(ROUTES.dashboard);
     } catch (e) {
@@ -60,7 +76,13 @@
         push(ROUTES.login);
         return;
       }
-      if (e instanceof ApiError && e.status === 400) {
+      // M3.21: 401 means setup token wrong or missing — the only
+      // production /setup endpoint shape that 401s. Show a specific
+      // message rather than the generic catch-all.
+      if (e instanceof ApiError && e.status === 401) {
+        error = 'Setup token is missing or incorrect. Copy the value of '
+              + 'KEYWORDISTA_SETUP_TOKEN from your container environment.';
+      } else if (e instanceof ApiError && e.status === 400) {
         error = e.body || 'Please check your input and try again.';
       } else {
         error = 'Something went wrong. Please try again.';
@@ -96,6 +118,31 @@
     {/if}
 
     <div class="space-y-4">
+      {#if tokenRequired}
+        <!-- M3.21: only rendered when the server-side env var is set.
+             The notice + autocomplete=off is intentional: this is an
+             out-of-band shared secret, not a remembered credential. -->
+        <label class="block">
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Setup token
+          </span>
+          <input
+            type="password"
+            autocomplete="off"
+            required
+            minlength={16}
+            placeholder="From KEYWORDISTA_SETUP_TOKEN"
+            bind:value={setupToken}
+            disabled={busy}
+            class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
+          />
+          <span class="block mt-1 text-xs text-gray-500 dark:text-gray-400">
+            This deploy requires a one-time token to claim the admin
+            account. Copy it from the container's environment.
+          </span>
+        </label>
+      {/if}
+
       <label class="block">
         <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Email</span>
         <input

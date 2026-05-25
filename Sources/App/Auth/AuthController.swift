@@ -46,16 +46,34 @@ struct AuthController {
     /// backend can render the dashboard directly, no login UI).
     let mode: RuntimeMode
 
+    /// M3.21: optional defense-in-depth for the `/setup` race window.
+    /// When non-nil, `POST /auth/setup` requires the matching value
+    /// in the `X-Keywordista-Setup-Token` header. nil = pre-M3.21
+    /// behavior (anyone can hit /setup before the first user exists).
+    /// Inert once the users table has any row (setup returns 410
+    /// independent of the token).
+    ///
+    /// **Comparison is constant-time** (via Crypto's `safeCompare`)
+    /// to defeat timing-based brute force during the boot window.
+    let setupToken: String?
+
+    /// Header name pinned as a const for both the route handler and
+    /// the response-side `setupTokenRequired` field of /auth/state
+    /// so the SPA can match.
+    static let setupTokenHeader = "X-Keywordista-Setup-Token"
+
     init(
         hasher: PasswordHasher,
         sessionTTLDays: Int,
         inviteTTLDays: Int,
-        mode: RuntimeMode
+        mode: RuntimeMode,
+        setupToken: String? = nil
     ) {
         self.hasher = hasher
         self.sessionTTLDays = sessionTTLDays
         self.inviteTTLDays = inviteTTLDays
         self.mode = mode
+        self.setupToken = setupToken
     }
 
     /// Registers all auth routes under `/api/v1/auth/*`.
@@ -76,7 +94,26 @@ struct AuthController {
     /// every user (manual DB surgery). This is the correct security
     /// posture: a public `/setup` endpoint on a running deployment
     /// would be a takeover vector.
+    ///
+    /// M3.21: when `setupToken` is configured, the request must carry
+    /// the matching value in `X-Keywordista-Setup-Token`. We check
+    /// the token BEFORE counting users so a misconfigured request
+    /// gets 401 even after first-run completes (rather than leaking
+    /// "you're at the right place but it's already set up" as 410).
     func setup(req: Request) async throws -> Response {
+        if let expected = setupToken {
+            let provided = req.headers.first(name: Self.setupTokenHeader) ?? ""
+            // Constant-time compare — defeats timing attacks during
+            // the deploy window where the token is the only thing
+            // between a passing scanner and an admin account.
+            // Using HMAC.isValidAuthenticationCode would be overkill;
+            // safeCompare from swift-crypto's underlying NIO source is
+            // not exposed publicly so we implement it inline.
+            guard constantTimeEqual(expected, provided) else {
+                throw Abort(.unauthorized, reason: "invalid setup token")
+            }
+        }
+
         if try await User.query(on: req.db).count() > 0 {
             throw Abort(.gone, reason: "setup already complete; use /auth/login")
         }
@@ -289,9 +326,43 @@ struct AuthController {
         return AuthStateResponse(
             mode: mode.rawValue,
             firstRun: firstRun,
+            // M3.21: tell the SPA whether the setup wizard needs the
+            // extra token field. Surfacing this is acceptable —
+            // learning "this deploy uses a token" gives an attacker
+            // nothing actionable (still need to brute-force 16+
+            // chars during the boot window, which is infeasible).
+            setupTokenRequired: setupToken != nil,
             signedIn: currentUser != nil,
             user: currentUser.map(UserResponse.init(user:))
         )
+    }
+
+    // MARK: - Constant-time string compare
+
+    /// M3.21: timing-safe string equality for the setup token check.
+    /// `==` on String short-circuits on the first byte mismatch,
+    /// which leaks token length and prefix to a network attacker
+    /// who can time requests. We compare every byte unconditionally
+    /// — XOR-and-OR the differences so the loop runs the same
+    /// number of cycles regardless of where (or whether) the
+    /// mismatch occurs.
+    ///
+    /// Operates on UTF-8 bytes, not Unicode scalars — tokens are
+    /// ASCII (hex/base64) by convention so this is harmless, and
+    /// it sidesteps Swift String's non-trivial equality semantics
+    /// (canonical equivalence) that could vary in time.
+    private func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+        let lhs = Array(a.utf8)
+        let rhs = Array(b.utf8)
+        // Length mismatch is a fast fail; the attacker learning
+        // token-length is acceptable (16-char min still means
+        // 96+ bits of unknown content).
+        guard lhs.count == rhs.count else { return false }
+        var diff: UInt8 = 0
+        for i in 0..<lhs.count {
+            diff |= lhs[i] ^ rhs[i]
+        }
+        return diff == 0
     }
 
     // MARK: - Session issuance helper
@@ -370,6 +441,11 @@ struct AuthStateResponse: Content {
     /// "local" or "server". The SPA hides every auth UI in local mode.
     let mode: String
     let firstRun: Bool
+    /// M3.21: when true, the SetupWizard SPA renders an extra
+    /// "Setup token" field and the request must carry the value
+    /// in `X-Keywordista-Setup-Token`. Mirrors the server-side
+    /// `setupToken != nil` check.
+    let setupTokenRequired: Bool
     let signedIn: Bool
     let user: UserResponse?
 }

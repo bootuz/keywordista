@@ -148,6 +148,12 @@ export interface UserSummary {
 export interface AuthState {
   mode: RuntimeMode;
   firstRun: boolean;
+  /// M3.21: when true, the deployment was booted with
+  /// KEYWORDISTA_SETUP_TOKEN set, so SetupWizard must collect the
+  /// token + the request must carry it in
+  /// `X-Keywordista-Setup-Token`. Surfaces server-side defense-in-
+  /// depth for raw-docker-run users who can't pre-seed an admin.
+  setupTokenRequired: boolean;
   signedIn: boolean;
   user: UserSummary | null;
 }

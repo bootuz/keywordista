@@ -33,7 +33,12 @@ enum AuthTestApp {
 
     /// Build a fully-wired test Application. Caller is responsible
     /// for `try await app.asyncShutdown()` (use defer).
-    static func make() async throws -> Application {
+    ///
+    /// - Parameter setupToken: M3.21 — when non-nil, the AuthController
+    ///   requires this value in `X-Keywordista-Setup-Token` on the
+    ///   /auth/setup request. Default nil = pre-M3.21 behavior so
+    ///   existing tests don't have to change.
+    static func make(setupToken: String? = nil) async throws -> Application {
         let app = try await Application.make(.testing)
 
         // ── Storage: in-memory SQLite ────────────────────────────
@@ -60,7 +65,8 @@ enum AuthTestApp {
             // protected route surface — local-mode integration
             // (auth-UI hidden, no middleware) is verified
             // separately via routes.swift code review.
-            mode: .server
+            mode: .server,
+            setupToken: setupToken
         )
         authController.register(on: api.grouped("auth"))
 

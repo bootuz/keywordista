@@ -142,9 +142,10 @@ struct EnvVarManifestTests {
     @Suite("Contract integrity")
     struct ContractTests {
 
-        @Test("EnvVars.all contains 23 unique entries (the v1.0 contract size)")
+        @Test("EnvVars.all contains 24 unique entries (the v1.0 contract size)")
         func allHasExpectedShape() {
-            #expect(EnvVars.all.count == 23, "if you added or removed an EnvVar, update this assertion AND docs/env-vars.md")
+            // 24 since M3.21 added KEYWORDISTA_SETUP_TOKEN.
+            #expect(EnvVars.all.count == 24, "if you added or removed an EnvVar, update this assertion AND docs/env-vars.md")
             let names = EnvVars.all.map(\.name)
             let unique = Set(names)
             #expect(names.count == unique.count, "EnvVars.all contains a duplicate name")
@@ -166,6 +167,7 @@ struct EnvVarManifestTests {
                 "DATABASE_URL",                         // contains password
                 "KEYWORDISTA_ENCRYPTION_KEY",
                 "KEYWORDISTA_ADMIN_PASSWORD_HASH",
+                "KEYWORDISTA_SETUP_TOKEN",              // M3.21
             ], "If you added a credential-type var, mark valueIsSecret AND update this assertion.")
         }
     }
@@ -360,7 +362,7 @@ struct EnvVarManifestTests {
             #expect(adminEmail?.presence == "unset")
         }
 
-        @Test("versionEnv marks the three credential vars as secret")
+        @Test("versionEnv marks the four credential vars as secret")
         func versionEnvSecretFlagPropagates() {
             let m = Manifest(mode: .server)
             let entries = m.versionEnv(env: .fixture([:]))
@@ -369,6 +371,7 @@ struct EnvVarManifestTests {
                 "DATABASE_URL",
                 "KEYWORDISTA_ENCRYPTION_KEY",
                 "KEYWORDISTA_ADMIN_PASSWORD_HASH",
+                "KEYWORDISTA_SETUP_TOKEN",          // M3.21
             ])
         }
     }

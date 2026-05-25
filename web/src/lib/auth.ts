@@ -35,9 +35,22 @@ export const getAuthState = () =>
 /// First-run admin creation. Server returns 410 if any user already
 /// exists — callers should treat 410 as "race condition, push to
 /// /login instead." The success path sets a session cookie.
-export const setupAdmin = (email: string, password: string) =>
+///
+/// M3.21: when the deployment was booted with KEYWORDISTA_SETUP_TOKEN,
+/// the request must carry it in `X-Keywordista-Setup-Token`. The SPA
+/// learns this is required via getAuthState().setupTokenRequired and
+/// passes the operator-supplied value via the `setupToken` arg.
+/// Server returns 401 if the token is missing/wrong.
+export const setupAdmin = (
+  email: string,
+  password: string,
+  setupToken?: string,
+) =>
   apiFetch<AuthSuccess>('/auth/setup', {
     method: 'POST',
+    headers: setupToken
+      ? { 'X-Keywordista-Setup-Token': setupToken }
+      : undefined,
     body: JSON.stringify({ email, password }),
   });
 
