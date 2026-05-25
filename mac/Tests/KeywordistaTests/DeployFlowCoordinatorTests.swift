@@ -59,6 +59,12 @@ final class DeployFlowCoordinatorTests: XCTestCase {
         // the validation path use a separate stub that rejects.
         var nameValidation: ServiceNameValidation = .ok
         func validateServiceName(_ name: String) -> ServiceNameValidation { nameValidation }
+        // M3.22: every Provider now declares its URL shape. Stub uses
+        // a deterministic .stub.test suffix so tests can assert on
+        // baseURL without coupling to a real provider's pattern.
+        func publicURLPattern(serviceName: String) -> URL? {
+            URL(string: "https://\(serviceName).stub.test")
+        }
         func createService(spec: DeploymentSpec, token: String) async throws -> ProviderService {
             try createResult.get()
         }

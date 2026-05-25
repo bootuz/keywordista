@@ -258,11 +258,13 @@ final class DeployFlowCoordinator: ObservableObject {
         }
         let encryptionKey = SecretsGenerator.generateEncryptionKey()
 
-        // Public URL: predicted from the service name. Render gives
-        // every web service a URL of the form
-        // https://<name>.onrender.com — predictable when no naming
-        // collision (Render returns 409 at create time on collision).
-        let publicURL = predictedPublicURL(serviceName: serviceName, provider: provider)
+        // M3.22: public URL prediction now lives on the Provider
+        // protocol — each provider owns its own subdomain shape.
+        // Render returns `{name}.onrender.com`. Falls back to a
+        // synthetic example.com URL if the provider returns nil
+        // (CustomDockerHost, where the URL isn't derived from name).
+        let publicURL = provider.publicURLPattern(serviceName: serviceName)
+            ?? URL(string: "https://\(serviceName).example.com")!
 
         // Resolve the concrete DatabaseChoice from the picker state.
         // For external PG we plug in the user-supplied URL here.
@@ -282,7 +284,16 @@ final class DeployFlowCoordinator: ObservableObject {
         var envVars: [String: String] = [
             "KEYWORDISTA_MODE": "server",
             "KEYWORDISTA_ENCRYPTION_KEY": encryptionKey,
-            "KEYWORDISTA_PUBLIC_BASE_URL": publicURL,
+            // M3.22: URL → absoluteString. publicURLPattern returns
+            // URL? (typed) instead of the old String-shape helper.
+            // Strip trailing slashes only (not all "/") to avoid
+            // PUBLIC_BASE_URL compounding into "//api/v1/..." in
+            // some clients that naively concatenate.
+            "KEYWORDISTA_PUBLIC_BASE_URL": {
+                var s = publicURL.absoluteString
+                while s.hasSuffix("/") { s.removeLast() }
+                return s
+            }(),
             "KEYWORDISTA_ADMIN_EMAIL": adminEmail,
             "KEYWORDISTA_ADMIN_PASSWORD_HASH": adminPasswordHash,
         ]
@@ -408,11 +419,14 @@ final class DeployFlowCoordinator: ObservableObject {
               let service = deployingService,
               let confirmation else { return }
 
+        // M3.22: prefer the URL the provider returned at create time
+        // (Render populates service.metadata["url"] once provisioning
+        // finishes); fall back to the provider's URL pattern when the
+        // metadata field is missing (most providers, most of the time
+        // — the URL takes a few seconds to appear post-create).
         let url = URL(string: service.metadata["url"] ?? "")
-            ?? URL(string: predictedPublicURL(
-                serviceName: confirmation.spec.serviceName,
-                provider: provider
-            ))!
+            ?? provider.publicURLPattern(serviceName: confirmation.spec.serviceName)
+            ?? URL(string: "https://\(confirmation.spec.serviceName).example.com")!
 
         // M3.20: wait for /api/v1/auth/state to answer too, not just
         // /health. The status sink writes into currentDeployStatus so
@@ -546,20 +560,13 @@ final class DeployFlowCoordinator: ObservableObject {
         }
     }
 
-    /// Predicts the public URL Render assigns to a service from its
-    /// name. Pattern: `https://<name>.onrender.com`. Render returns
-    /// 409 on naming collision before deploy, so this prediction is
-    /// safe at proceed-to-confirm time.
-    private func predictedPublicURL(serviceName: String, provider: any Provider) -> String {
-        // For v1 we hardcode Render's URL shape; M4's FlyProvider
-        // gets its own shape (.fly.dev with possible suffix). Future
-        // refactor: move this into Provider as `publicURLPattern(name:)`.
-        switch provider.kind {
-        case .render: return "https://\(serviceName).onrender.com"
-        case .fly: return "https://\(serviceName).fly.dev"
-        default: return "https://\(serviceName).example.com"
-        }
-    }
+    // M3.22: predictedPublicURL was extracted onto the Provider
+    // protocol as `publicURLPattern(serviceName:) -> URL?`. Each
+    // provider now owns its own subdomain shape; the coordinator
+    // just asks. New providers (M4 Fly, M5 Railway/DO/Custom) don't
+    // need to touch coordinator code anymore — they implement
+    // publicURLPattern in their own file and the cockpit picks it
+    // up automatically. See RenderProvider for the canonical impl.
 
     private func startConsumingDeployEvents(
         service: ProviderService,

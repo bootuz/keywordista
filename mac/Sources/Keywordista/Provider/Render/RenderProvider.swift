@@ -134,6 +134,22 @@ struct RenderProvider: Provider {
         return .ok
     }
 
+    /// M3.22: Render's public URL pattern is `{name}.onrender.com`.
+    /// Always returns non-nil for Render — every service has a
+    /// predictable subdomain matching its name. Custom domains
+    /// are not modeled (out of v1 scope per plan §NG5).
+    ///
+    /// Caller should pre-validate the name via validateServiceName —
+    /// passing a name that contains underscores would produce a
+    /// URL that DOESN'T match the actual service's subdomain
+    /// (Render silently normalizes underscores to hyphens). That
+    /// drift is exactly the M3.16 bug, and the front-line defense
+    /// is validateServiceName rejecting underscores before they
+    /// reach this function.
+    func publicURLPattern(serviceName: String) -> URL? {
+        URL(string: "https://\(serviceName).onrender.com")
+    }
+
     func estimateMonthlyCost(spec: DeploymentSpec) -> Money {
         var total = Money.usd(spec.plan.monthlyCostCents)
         switch spec.database {
