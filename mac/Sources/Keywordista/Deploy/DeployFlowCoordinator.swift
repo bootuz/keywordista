@@ -219,6 +219,15 @@ final class DeployFlowCoordinator: ObservableObject {
         guard !serviceName.isEmpty else {
             throw DeployFlowError.missingField("service name")
         }
+        // Provider-specific service-name validation. Catches the
+        // class of bug where invalid names (underscores etc.) silently
+        // break invite-link generation because Render normalizes the
+        // name for the URL but we use the raw name for env-var
+        // prediction. See Provider.validateServiceName doc.
+        let nameCheck = provider.validateServiceName(serviceName)
+        if case .invalid(let message) = nameCheck {
+            throw DeployFlowError.invalidField(message)
+        }
         guard !adminEmail.isEmpty else {
             throw DeployFlowError.missingField("admin email")
         }

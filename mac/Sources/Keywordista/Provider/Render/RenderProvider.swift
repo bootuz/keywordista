@@ -91,6 +91,49 @@ struct RenderProvider: Provider {
         ]
     }
 
+    /// Render's service-name rules (from their API docs + empirical
+    /// confirmation by deploying invalid names and observing 400s):
+    ///
+    ///   • Lowercase ASCII letters, digits, hyphens only
+    ///   • Must start with a letter or digit (NOT a hyphen)
+    ///   • Max length ~30 characters in practice (longer names are
+    ///     accepted by API but generate ugly truncated subdomains)
+    ///   • Underscores: BANNED — Render normalizes them to hyphens
+    ///     for the DNS subdomain but the cockpit's URL prediction
+    ///     uses the raw name, causing PUBLIC_BASE_URL drift (see
+    ///     the Provider protocol's validateServiceName doc).
+    ///
+    /// Bare regex check — fast enough that ConfigureView can call
+    /// this on every keystroke for live feedback without measurable
+    /// cost.
+    func validateServiceName(_ name: String) -> ServiceNameValidation {
+        if name.isEmpty {
+            return .invalid("Service name can't be empty.")
+        }
+        if name.count > 30 {
+            return .invalid("Service name should be 30 characters or fewer (got \(name.count)).")
+        }
+        // Quick checks for the most common user mistakes — surface
+        // a SPECIFIC remediation rather than a generic regex-fail
+        // message, because "no underscores" is the bug we're
+        // primarily defending against.
+        if name.contains("_") {
+            return .invalid("Service name can't contain underscores. Use hyphens instead — Render's rule. (Underscores in the name silently break invite-link generation.)")
+        }
+        if name != name.lowercased() {
+            return .invalid("Service name must be all lowercase.")
+        }
+        if name.hasPrefix("-") {
+            return .invalid("Service name must start with a letter or digit, not a hyphen.")
+        }
+        // Final catch-all regex for anything we didn't pre-flag.
+        let pattern = "^[a-z0-9][a-z0-9-]*$"
+        if name.range(of: pattern, options: .regularExpression) == nil {
+            return .invalid("Service name must use only lowercase letters, digits, and hyphens.")
+        }
+        return .ok
+    }
+
     func estimateMonthlyCost(spec: DeploymentSpec) -> Money {
         var total = Money.usd(spec.plan.monthlyCostCents)
         switch spec.database {

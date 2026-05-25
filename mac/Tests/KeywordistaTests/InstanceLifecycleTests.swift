@@ -23,6 +23,7 @@ final class InstanceLifecycleTests: XCTestCase {
         func availablePlans(account: ProviderAccount, token: String) async throws -> [Plan] { [] }
         func availableDatabases(account: ProviderAccount, token: String) async throws -> [DatabaseOption] { [] }
         func estimateMonthlyCost(spec: DeploymentSpec) -> Money { .zero }
+        func validateServiceName(_ name: String) -> ServiceNameValidation { .ok }
         func createService(spec: DeploymentSpec, token: String) async throws -> ProviderService { fatalError() }
         func streamDeployEvents(service: ProviderService, token: String) -> AsyncStream<DeployEvent> {
             AsyncStream { $0.finish() }

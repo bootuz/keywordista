@@ -55,6 +55,10 @@ final class DeployFlowCoordinatorTests: XCTestCase {
         func estimateMonthlyCost(spec: DeploymentSpec) -> Money {
             .usd(spec.plan.monthlyCostCents)
         }
+        // Stub always accepts the name unless overridden. Tests of
+        // the validation path use a separate stub that rejects.
+        var nameValidation: ServiceNameValidation = .ok
+        func validateServiceName(_ name: String) -> ServiceNameValidation { nameValidation }
         func createService(spec: DeploymentSpec, token: String) async throws -> ProviderService {
             try createResult.get()
         }
@@ -196,6 +200,29 @@ final class DeployFlowCoordinatorTests: XCTestCase {
         XCTAssertNotNil(confirmation.spec.envVars["KEYWORDISTA_ENCRYPTION_KEY"])
         XCTAssertNotNil(confirmation.spec.envVars["KEYWORDISTA_ADMIN_PASSWORD_HASH"])
         XCTAssertEqual(confirmation.adminPassword.count, 24)
+    }
+
+    @MainActor
+    func testProceedToConfirmThrowsWhenProviderRejectsServiceName() async {
+        // The M3.16 integration: cockpit asks provider.validateServiceName
+        // before assembling the spec. Stub returns .invalid → coordinator
+        // should throw .invalidField rather than continue.
+        var stub = StubProvider()
+        stub.nameValidation = .invalid("Render says no underscores.")
+        let coord = DeployFlowCoordinator(providers: [], onCompletion: { _ in })
+        coord.selectProvider(stub)
+        coord.token = "t"
+        await coord.authenticate()
+        coord.serviceName = "studio_prod"   // user typed an invalid name
+        coord.adminEmail = "you@studio.local"
+
+        XCTAssertThrowsError(try coord.proceedToConfirm()) { err in
+            guard case DeployFlowError.invalidField(let msg) = err else {
+                XCTFail("expected .invalidField, got \(err)"); return
+            }
+            XCTAssertTrue(msg.contains("underscore"))
+        }
+        XCTAssertEqual(coord.phase, .configure, "validation failure must keep us on configure")
     }
 
     @MainActor

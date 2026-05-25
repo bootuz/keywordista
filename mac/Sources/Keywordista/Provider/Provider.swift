@@ -81,6 +81,25 @@ protocol Provider: Sendable {
     /// from plan/disk/region pricing — no network call.
     func estimateMonthlyCost(spec: DeploymentSpec) -> Money
 
+    /// Validates a candidate service name against the provider's
+    /// naming rules. Synchronous — no network, just regex. Used by
+    /// ConfigureView for live keystroke feedback AND by
+    /// DeployFlowCoordinator.proceedToConfirm as the final guard.
+    ///
+    /// **Why this matters**: Render normalizes underscores to
+    /// hyphens for the URL's DNS-safe subdomain (Render's rule:
+    /// `^[a-z0-9][a-z0-9-]*$`). Without client-side validation, a
+    /// user typing `studio_prod` would get a service at
+    /// `studio-prod.onrender.com` BUT the cockpit's URL prediction
+    /// (`https://<name>.onrender.com`) would bake `studio_prod`
+    /// into KEYWORDISTA_PUBLIC_BASE_URL — and invite links sent to
+    /// teammates would resolve to a non-existent host. Caught the
+    /// hard way during the first real Render deploy attempt.
+    ///
+    /// Returns `.ok` if valid; `.invalid(message)` with provider-
+    /// specific remediation copy otherwise.
+    func validateServiceName(_ name: String) -> ServiceNameValidation
+
     // ── Step 5: Deploy ───────────────────────────────────────────
 
     /// Creates the service per the spec. Sequenced per database
@@ -160,6 +179,23 @@ protocol Provider: Sendable {
 }
 
 // MARK: - Provider metadata types
+
+/// Synchronous service-name validation result. Each provider exposes
+/// its own naming rules via `validateServiceName(_:)`.
+enum ServiceNameValidation: Sendable, Equatable {
+    case ok
+    /// Provider-specific human-friendly message — surfaces in the
+    /// Configure step's inline error under the name field.
+    case invalid(String)
+
+    var isValid: Bool { if case .ok = self { return true } else { return false } }
+
+    /// Convenience for views that want to render the error string OR
+    /// nil for the "no error" case.
+    var errorMessage: String? {
+        if case .invalid(let msg) = self { return msg } else { return nil }
+    }
+}
 
 /// Tier indicator influencing the picker view's grouping.
 enum ProviderSupport: Sendable, Equatable {

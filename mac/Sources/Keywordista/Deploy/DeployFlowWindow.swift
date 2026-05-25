@@ -275,6 +275,16 @@ private struct ConfigureView: View {
     @ObservedObject var coordinator: DeployFlowCoordinator
     @State private var validationError: String?
 
+    /// Live-validated service-name error from the selected provider's
+    /// rules. Recomputed on every coordinator.serviceName change
+    /// (SwiftUI re-evaluates body when @Published fires). Empty input
+    /// shows no error (don't yell at the user before they type).
+    private var serviceNameError: String? {
+        guard !coordinator.serviceName.isEmpty,
+              let provider = coordinator.selectedProvider else { return nil }
+        return provider.validateServiceName(coordinator.serviceName).errorMessage
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
@@ -296,6 +306,16 @@ private struct ConfigureView: View {
                     formRow("Service name") {
                         TextField("studio-prod", text: $coordinator.serviceName)
                             .textFieldStyle(.roundedBorder)
+                        // Live per-keystroke validation via the selected
+                        // provider's rules. Shown red below the field so
+                        // the user knows the problem BEFORE hitting
+                        // Continue — and the Continue button's
+                        // primaryDisabled below also reads from this.
+                        if let nameError = serviceNameError {
+                            Text(nameError)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
                     }
 
                     formRow("Region") {
@@ -344,6 +364,7 @@ private struct ConfigureView: View {
                 primaryLabel: "Continue →",
                 primaryDisabled: coordinator.serviceName.isEmpty
                     || coordinator.adminEmail.isEmpty
+                    || serviceNameError != nil
             )
         }
     }
