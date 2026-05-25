@@ -397,7 +397,13 @@ final class DeployFlowCoordinator: ObservableObject {
     /// Step 5 → Step 6 (.success). Called after the deploy stream
     /// yields .healthCheckPassed. Builds the RemoteInstance + the
     /// SuccessContext.
-    private func transitionToSuccess() {
+    ///
+    /// M3.20: now `async` because we run `ReadinessProbe` between the
+    /// provider's health check passing and the success screen showing.
+    /// See ReadinessProbe.swift for the rationale — short version is
+    /// /health=200 isn't proof the auth stack is mounted yet, and the
+    /// user lands on a broken login page if we transition too eagerly.
+    private func transitionToSuccess() async {
         guard let provider = selectedProvider,
               let service = deployingService,
               let confirmation else { return }
@@ -407,6 +413,40 @@ final class DeployFlowCoordinator: ObservableObject {
                 serviceName: confirmation.spec.serviceName,
                 provider: provider
             ))!
+
+        // M3.20: wait for /api/v1/auth/state to answer too, not just
+        // /health. The status sink writes into currentDeployStatus so
+        // the user sees readable progress instead of a frozen screen.
+        currentDeployStatus = "Health check passed — verifying server is fully ready…"
+        let outcome = await ReadinessProbe.waitForReady(
+            baseURL: url,
+            statusSink: { [weak self] status in
+                self?.currentDeployStatus = status
+            }
+        )
+        switch outcome {
+        case .ready:
+            break  // fall through to build the RemoteInstance below
+        case .timedOut:
+            failure = FailureContext(
+                reason: """
+                    The server passed /health but never answered \
+                    /api/v1/auth/state within \(Int(ReadinessProbe.timeout))s.
+
+                    This usually means a database migration is hung or \
+                    auth routes failed to mount post-boot. Check the \
+                    provider's deploy logs (Render → Logs tab) for a \
+                    Swift backtrace or DB error.
+                    """,
+                retryable: true
+            )
+            phase = .failed
+            return
+        case .cancelled:
+            // Window was closed / user cancelled mid-probe. The phase
+            // is already .deploying; let the caller clean up.
+            return
+        }
 
         let remote = RemoteInstance(
             displayName: confirmation.spec.serviceName,
@@ -535,7 +575,14 @@ final class DeployFlowCoordinator: ObservableObject {
                 case .statusChanged(let status):
                     self.currentDeployStatus = status
                 case .healthCheckPassed:
-                    self.transitionToSuccess()
+                    // M3.20: /health passing isn't sufficient. Vapor
+                    // registers /health before mounting auth routes, so
+                    // there's a 1–5s window where /health=200 but
+                    // /api/v1/auth/state=503. Wait for the auth route
+                    // to answer too before declaring success — otherwise
+                    // the user clicks "Open dashboard" and lands on a
+                    // broken login page.
+                    await self.transitionToSuccess()
                     return
                 case .failed(let reason):
                     // Fix A: enrich the raw reason with provider-side
