@@ -240,7 +240,13 @@ jobs:
           set -euo pipefail
           # Use one of the published tags to look up the manifest list
           # digest — they all point at the same multi-arch index.
-          first_tag=$(echo '${{ steps.meta.outputs.tags }}' | awk '{print $1}')
+          # `steps.meta.outputs.tags` is a NEWLINE-separated list (one
+          # ref per line); we grab the first line. Previously this used
+          # `awk '{print $1}'` which prints the first field of EACH line,
+          # producing a multi-line string that `imagetools inspect`
+          # rejected as "invalid reference format." Caught in the M3.15
+          # first run.
+          first_tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
           digest=$(docker buildx imagetools inspect "$first_tag" --format '{{json .Manifest}}' | jq -r .digest)
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "→ Combined manifest digest: $digest"
