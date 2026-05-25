@@ -90,6 +90,12 @@ struct RemoteInstance: Sendable, Codable, Equatable {
     /// Fly uses the app name; etc. Treated as a black-box string here —
     /// providers parse it themselves.
     let providerServiceId: String
+    /// The provider-account ID the API token in Keychain is filed under.
+    /// Needed for Delete (destroy → provider.destroy needs the token).
+    /// nil for instances added via "Add existing deployment" (M3.10) —
+    /// the cockpit didn't provision them and has no token, so Delete
+    /// is unavailable for those (Disconnect still works).
+    let providerAccountId: String?
     let baseURL: URL
     /// Image tag the deployment was created with (e.g. "1.0.0" or a
     /// digest). Surfaced by RemoteUpdateChecker (M5) when comparing

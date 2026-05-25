@@ -63,6 +63,10 @@ final class AddExistingCoordinator: ObservableObject {
                     displayName: baseURL.host ?? "Imported deployment",
                     providerKind: .customDockerHost,    // we don't know
                     providerServiceId: "imported",
+                    // nil — cockpit didn't provision this, so no provider
+                    // token in Keychain. Delete will surface as "not
+                    // available for imported instances" in M3.12.
+                    providerAccountId: nil,
                     baseURL: baseURL,
                     imageTag: "unknown",
                     createdAt: Date(),

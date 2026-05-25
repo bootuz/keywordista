@@ -30,6 +30,14 @@ struct MenuView_v2: View {
     /// the sheet; this callback fires it.
     let onAddExisting: () -> Void
 
+    /// Disconnect → remove from menubar only (M3.12). The owner
+    /// (KeywordistaApp wiring) shows a confirm dialog first.
+    let onDisconnect: (Instance) -> Void
+
+    /// Delete → call provider.destroy then disconnect (M3.12). Owner
+    /// shows a strong confirm because it's irreversible.
+    let onDelete: (Instance) -> Void
+
     var body: some View {
         // Per-instance submenus (or empty state).
         if instanceStore.instances.isEmpty {
@@ -99,7 +107,7 @@ struct MenuView_v2: View {
                 }
                 .disabled(supervisor.status != .running)
 
-            case .remote:
+            case .remote(let remote):
                 Divider()
                 // M5 stubs — disabled but visible so the user sees
                 // what's coming. Removed entirely would be more
@@ -110,14 +118,16 @@ struct MenuView_v2: View {
 
                 Divider()
                 Button("Disconnect (keep server running)") {
-                    // M3.12 wires this — removes from InstanceStore +
-                    // Keychain but leaves the provider-side service alone.
+                    onDisconnect(instance)
                 }
-                .disabled(true)
-                Button("Delete (destroy on provider)", role: .destructive) {
-                    // M3.12 wires this — calls provider.destroy().
+                // Imported instances (M3.10) don't have a provider API
+                // token in Keychain, so Delete is unavailable for them.
+                // Disconnect still works — it's the right action there.
+                if remote.providerAccountId != nil {
+                    Button("Delete (destroy on provider)", role: .destructive) {
+                        onDelete(instance)
+                    }
                 }
-                .disabled(true)
             }
         }
     }

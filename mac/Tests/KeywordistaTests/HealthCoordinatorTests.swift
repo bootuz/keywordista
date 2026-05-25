@@ -26,6 +26,7 @@ final class HealthCoordinatorTests: XCTestCase {
                 displayName: "Test",
                 providerKind: .render,
                 providerServiceId: "srv-xxxxx",
+                providerAccountId: "tea-test",
                 baseURL: URL(string: "https://example.onrender.com")!,
                 imageTag: "1.0.0",
                 createdAt: Date(),

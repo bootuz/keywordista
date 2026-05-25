@@ -374,6 +374,7 @@ final class DeployFlowCoordinator: ObservableObject {
             displayName: confirmation.spec.serviceName,
             providerKind: provider.kind,
             providerServiceId: service.id,
+            providerAccountId: account?.id,
             baseURL: url,
             imageTag: confirmation.spec.imageRef,
             createdAt: Date(),

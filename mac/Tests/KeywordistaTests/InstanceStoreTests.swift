@@ -32,6 +32,7 @@ final class InstanceStoreTests: XCTestCase {
                 displayName: name,
                 providerKind: .render,
                 providerServiceId: "srv-abc123",
+                providerAccountId: "tea-test",
                 baseURL: URL(string: "https://example.onrender.com")!,
                 imageTag: "1.0.0",
                 createdAt: Date(timeIntervalSince1970: 1_700_000_000),
