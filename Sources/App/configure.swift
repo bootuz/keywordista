@@ -145,6 +145,40 @@ public func configure(_ app: Application) async throws {
 
     try await app.autoMigrate()
 
+    // ── Admin bootstrap (closes the auth-takeover hole) ──────────────
+    //
+    // CRITICAL ORDERING: this MUST run before routes() so the HTTP
+    // server can't start accepting /api/v1/auth/setup requests until
+    // either:
+    //   (a) the cockpit-supplied admin user is seeded, OR
+    //   (b) we've logged that no env-var admin was supplied (raw
+    //       docker run, the operator will use the in-browser wizard).
+    //
+    // Without this, cockpit-deployed instances on predictable
+    // *.onrender.com subdomains leave /setup open during the boot
+    // window — any visitor claims admin. See AdminBootstrap.swift
+    // for the full security rationale.
+    let bootstrapOutcome = try await AdminBootstrap.run(
+        manifest: manifest,
+        on: app.db,
+        logger: app.logger
+    )
+    // Log every outcome at info+ for ops visibility — the security
+    // story is "this deployment's first-run posture is X."
+    switch bootstrapOutcome {
+    case .seeded:
+        break   // AdminBootstrap.run already logged at .notice
+    case .alreadyHasUsers:
+        app.logger.info("admin bootstrap skipped: users table not empty")
+    case .envVarsNotProvided:
+        app.logger.info("""
+            admin bootstrap skipped: KEYWORDISTA_ADMIN_EMAIL / \
+            KEYWORDISTA_ADMIN_PASSWORD_HASH not set. First visitor to \
+            /api/v1/auth/setup will claim admin — restrict access via \
+            CDN/VPN until you complete first-run setup.
+            """)
+    }
+
     // Boot-time auth-session sweep: DELETE rows whose expiresAt has
     // already passed. In local mode this is a no-op (no sessions
     // ever created); in server mode it keeps the table from growing
