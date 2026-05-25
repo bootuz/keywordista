@@ -281,10 +281,10 @@ final class DeployFlowCoordinator: ObservableObject {
             envVars["KEYWORDISTA_RENDER_OWNER_ID"] = accountID
         }
 
-        // For v1, image ref is pinned to the latest published tag.
-        // Future: cockpit fetches the manifest from GHCR and pins to
-        // digest. For now, plain tag.
-        let imageRef = "ghcr.io/bootuz/keywordista:latest"
+        // Image ref from CockpitConfig (overridable by forks via the
+        // KEYWORDISTA_COCKPIT_IMAGE_REF env var, defaulting to the
+        // canonical ghcr.io/bootuz/keywordista:latest).
+        let imageRef = CockpitConfig.imageRef
 
         let spec = DeploymentSpec(
             imageRef: imageRef,
@@ -306,13 +306,42 @@ final class DeployFlowCoordinator: ObservableObject {
 
     /// Step 4 → Step 5. Triggers the actual createService + starts the
     /// deploy-event stream consumer. On success transitions to Step 6.
+    ///
+    /// **Pre-flight**: probes GHCR to verify the image is publicly
+    /// pullable BEFORE asking the provider to create a service.
+    /// Without this, a missing/private image only surfaces ~60s later
+    /// as Render's confusing "lookup error: the provided URL could not
+    /// be fetched" — and the user has burned half a minute waiting on
+    /// a doomed deploy. The probe is a single HEAD-after-anon-token to
+    /// ghcr.io; takes ~200ms.
     func deploy() async {
         guard let provider = selectedProvider,
               let confirmation else { return }
 
         phase = .deploying
-        currentDeployStatus = "Creating service…"
+        currentDeployStatus = "Verifying image is published…"
         deployEvents = []
+
+        // ── Fix B: pre-deploy image probe ──────────────────────────
+        // Fail fast with a clear remediation message before spending
+        // any of the user's provider quota on a doomed deploy.
+        do {
+            try await GHCRProbe.checkPublicImage(ref: confirmation.spec.imageRef)
+        } catch let probeError as ProbeError {
+            failure = FailureContext(
+                reason: probeError.description,
+                retryable: true  // user can fix the image + retry
+            )
+            phase = .failed
+            return
+        } catch {
+            // Network-level probe failure isn't a deal-breaker — GHCR
+            // could be momentarily flaky and the deploy might still
+            // work. Log but proceed.
+            deployEvents.append(.logLine("Image probe inconclusive: \(error.localizedDescription)"))
+        }
+
+        currentDeployStatus = "Creating service…"
 
         do {
             let service = try await provider.createService(
@@ -500,7 +529,18 @@ final class DeployFlowCoordinator: ObservableObject {
                     self.transitionToSuccess()
                     return
                 case .failed(let reason):
-                    self.failure = FailureContext(reason: reason, retryable: true)
+                    // Fix A: enrich the raw reason with provider-side
+                    // event context so the user gets actionable
+                    // diagnosis instead of "deploy ended in
+                    // build_failed". Best-effort — fetch the recent
+                    // events; if THAT fails, fall back to the raw
+                    // reason rather than blocking the failure UI.
+                    let enriched = await self.enrichFailureReason(
+                        reason: reason,
+                        service: service,
+                        provider: provider
+                    )
+                    self.failure = FailureContext(reason: enriched, retryable: true)
                     self.phase = .failed
                     return
                 case .logLine:
@@ -509,6 +549,76 @@ final class DeployFlowCoordinator: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Fix A: enriches a terminal deploy failure with provider-side
+    /// event context. Returns a multi-line string for FailureView.
+    /// Best-effort — if fetchLogs throws, returns the original reason
+    /// alone rather than blocking the failure UI.
+    ///
+    /// Heuristic: scans the recent events for known failure indicators
+    /// (`image_pull_failed`, `build_ended`) and adds a remediation
+    /// line for the most common cause (image not published/public).
+    /// We DON'T parse the full Render `event.details` discriminated
+    /// union — its structure varies enough that string matching the
+    /// event TYPE name is more robust than schema-shape extraction.
+    private func enrichFailureReason(
+        reason: String,
+        service: ProviderService,
+        provider: any Provider
+    ) async -> String {
+        let imageRef = confirmation?.spec.imageRef ?? CockpitConfig.imageRef
+        // Fetch last few minutes of events to look for the failure.
+        let since = Date().addingTimeInterval(-300)  // 5 min ago
+        let recentLogs: [LogLine]
+        do {
+            recentLogs = try await provider.fetchLogs(
+                service: service,
+                since: since,
+                token: token
+            )
+        } catch {
+            // Couldn't get logs — return the raw reason. The user
+            // still gets the "deploy ended in build_failed" line.
+            return reason
+        }
+
+        // Heuristic match against the event-type names we care about.
+        // image_pull_failed is THE common one — covers "image doesn't
+        // exist", "image is private", "wrong digest". The fix is
+        // always the same: publish + make public.
+        let imagePullFailed = recentLogs.contains {
+            $0.message.lowercased().contains("image pull failed")
+        }
+        let buildFailed = recentLogs.contains {
+            $0.message.lowercased().contains("build failed")
+        }
+
+        if imagePullFailed {
+            return """
+                Render couldn't pull the image \(imageRef).
+
+                Most common causes (in order):
+                  1. The image isn't published yet. The release-image GitHub workflow publishes on `image-v*` tags. Check the latest run at github.com/<owner>/keywordista/actions.
+                  2. The image is published but the GHCR package is private. Make it public via the package settings on GitHub.
+                  3. You're using a tag that exists in the workflow but hasn't built yet (~10 min on first push).
+                """
+        }
+
+        if buildFailed {
+            return """
+                Render's build of \(imageRef) failed.
+
+                Open the Render dashboard's deploy log for this service to see why — usually a startup error in the container (port collision, migration failure, missing env var).
+
+                \(reason)
+                """
+        }
+
+        // No specific signal — return the raw reason. Better than
+        // misleading boilerplate when we don't actually know what
+        // went wrong.
+        return reason
     }
 
     private func userFacingMessage(_ error: ProviderError) -> String {
