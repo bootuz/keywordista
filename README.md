@@ -25,7 +25,7 @@ Click **Open Dashboard** → the browser opens `http://127.0.0.1:8080/` (auto-pi
 
 ### Build from source
 
-If you want to hack on it, you'll also need Swift 5.10+ and Node 18+.
+If you want to hack on it, you'll also need Swift 5.10+ and Node 20+ (CI builds on Node 24).
 
 ```bash
 git clone https://github.com/bootuz/keywordista.git

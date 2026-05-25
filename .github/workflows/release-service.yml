@@ -109,7 +109,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # M3.23: bumped from 20 → 24 ahead of GitHub Actions' Node 20
+          # deprecation (June 2026) + Node 20's own EOL (April 2026).
+          node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
