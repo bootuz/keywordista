@@ -729,6 +729,26 @@ private struct SuccessView: View {
 
                     Divider()
 
+                    // Cost recap so the user has a concrete "what
+                    // I'm being charged" line on the success screen,
+                    // not just in the now-dismissed Confirm step.
+                    HStack(spacing: 6) {
+                        Image(systemName: "creditcard")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(ctx.providerDisplayName) will bill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(ctx.estimatedMonthlyCost.formatted)/mo")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Text("for this deployment.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
                     // The plaintext admin password lives here ONCE.
                     // The "save this now" banner is intentionally loud.
                     VStack(alignment: .leading, spacing: 8) {

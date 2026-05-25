@@ -385,7 +385,9 @@ final class DeployFlowCoordinator: ObservableObject {
             instance: instance,
             adminEmail: adminEmail,
             adminPassword: confirmation.adminPassword,
-            publicURL: url
+            publicURL: url,
+            estimatedMonthlyCost: confirmation.estimatedMonthlyCost,
+            providerDisplayName: provider.displayName
         )
         phase = .success
     }
@@ -565,6 +567,13 @@ struct SuccessContext {
     let adminEmail: String
     let adminPassword: String
     let publicURL: URL
+    /// Carried forward from ConfirmationContext so SuccessView can
+    /// show "Render will bill $7.25/mo for this deployment" — closes
+    /// the loop on what the user just committed to without making
+    /// them mentally re-add the line items.
+    let estimatedMonthlyCost: Money
+    /// "Render", "Fly.io", etc. for the "<provider> will bill" line.
+    let providerDisplayName: String
 }
 
 struct FailureContext {

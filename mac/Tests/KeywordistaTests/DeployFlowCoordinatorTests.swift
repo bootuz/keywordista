@@ -293,4 +293,49 @@ final class DeployFlowCoordinatorTests: XCTestCase {
         // StubProvider's estimateMonthlyCost returns plan-only.
         XCTAssertEqual(cost.cents, 700)
     }
+
+    // ── M3.11: cost rendering for the 3 database choices ────────────
+
+    func testRenderCatalogCostMath() {
+        // Pin the line-item math the cockpit's CostBreakdown view
+        // renders. These are the numbers the user sees in Confirm
+        // and Success, so a wrong addition shows up as the wrong
+        // billing expectation.
+        let provider = RenderProvider()
+        let starter = RenderCatalog.webServicePlans.first!
+
+        // Plan + 1 GB disk = $7.00 + $0.25 = $7.25
+        let sqliteSpec = makeRenderSpec(
+            plan: starter,
+            database: .sqliteOnDisk(size: RenderCatalog.diskSizes.first!)
+        )
+        XCTAssertEqual(provider.estimateMonthlyCost(spec: sqliteSpec).cents, 725)
+
+        // Plan + cheapest managed PG = $7.00 + $6.00 = $13.00
+        let pgSpec = makeRenderSpec(
+            plan: starter,
+            database: .providerManagedPostgres(plan: RenderCatalog.postgresPlans.first!)
+        )
+        XCTAssertEqual(provider.estimateMonthlyCost(spec: pgSpec).cents, 1300)
+
+        // Plan + external PG = $7.00 + $0 = $7.00 (user pays their PG host)
+        let extSpec = makeRenderSpec(
+            plan: starter,
+            database: .externalPostgres(connectionURL: "postgres://x")
+        )
+        XCTAssertEqual(provider.estimateMonthlyCost(spec: extSpec).cents, 700)
+    }
+
+    // Helper for the cost-math test — minimal spec matching
+    // RenderProvider's expected shape.
+    private func makeRenderSpec(plan: Plan, database: DatabaseChoice) -> DeploymentSpec {
+        DeploymentSpec(
+            imageRef: "ghcr.io/x/k:1.0",
+            serviceName: "test",
+            region: RenderCatalog.regions.first!,
+            plan: plan,
+            database: database,
+            envVars: ["KEYWORDISTA_RENDER_OWNER_ID": "tea-x"]
+        )
+    }
 }
