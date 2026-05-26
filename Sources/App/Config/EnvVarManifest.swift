@@ -418,7 +418,7 @@ public enum EnvVars {
 
     public static let adminEmail = EnvVar<String>(
         name: "KEYWORDISTA_ADMIN_EMAIL",
-        description: "If set with KEYWORDISTA_ADMIN_PASSWORD_HASH and the users table is empty at boot, seeds an admin user. The cockpit uses this for pre-baked-credentials deploys.",
+        description: "If set with KEYWORDISTA_ADMIN_PASSWORD_HASH and the users table is empty at boot, seeds an admin user. The cockpit uses this for pre-baked-credentials deploys; raw-docker operators usually prefer `keywordista createsuperuser` after boot instead.",
         defaults: { _ in nil },
         defaultDescription: { _ in nil },
         parse: Parsers.email

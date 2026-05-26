@@ -8,7 +8,7 @@ import Vapor
 @testable import App
 
 /// Pins the security contract of AdminBootstrap.run — the boot-time
-/// hook that closes the /api/v1/auth/setup takeover hole.
+/// hook that closes the /api/v1/auth/setup takeover hole (M3.25 removed the endpoint; bootstrap is still load-bearing).
 ///
 /// **Security story** (from AdminBootstrap.swift):
 ///   cockpit-deployed instances send the admin credentials as env

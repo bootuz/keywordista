@@ -53,7 +53,7 @@ docker run -d \
   ghcr.io/bootuz/keywordista:latest
 ```
 
-Visit your URL → setup wizard creates the admin user → invite teammates from inside the dashboard. The image is signed with cosign + carries SLSA-3 provenance; verification commands and the full env-var contract are documented below.
+Bootstrap your admin with `docker exec -it keywordista keywordista createsuperuser`, then log in and invite teammates from inside the dashboard. The image is signed with cosign + carries SLSA-3 provenance; verification commands and the full env-var contract are documented below.
 
 Reference deploy manifests live in [`deploy/`](deploy/):
 

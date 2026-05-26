@@ -189,34 +189,11 @@ as env vars** — the cockpit hashes locally on the Mac before sending
 the hash to the provider. Generate with `htpasswd -nB -C 12 yourname |
 cut -d: -f2`.
 
-### `KEYWORDISTA_SETUP_TOKEN`
-
-- **Type:** string, min 16 chars
-- **Required:** no
-- **Since:** 1.0
-- **Secret:** ✅
-
-Defense-in-depth for raw-`docker run` users who can't pre-seed an
-admin via `KEYWORDISTA_ADMIN_*`. When set, `POST /api/v1/auth/setup`
-requires the matching value in the `X-Keywordista-Setup-Token`
-header — closing the takeover window between "deploy goes live" and
-"operator clicks Submit in the setup wizard."
-
-Without this, a network scanner that hits your fresh deploy URL
-during the boot window can claim the admin account. The token closes
-that attack at the cost of one extra paste during setup.
-
-Generate with `openssl rand -hex 32` (256 bits, well above the 16-char
-minimum). The SetupWizard SPA renders an extra "Setup token" field
-automatically (the server surfaces `setupTokenRequired: true` in
-`/api/v1/auth/state`, the SPA reads it).
-
-Inert once any user exists — `/setup` returns 401 to anyone, with or
-without the token. Pair with `KEYWORDISTA_ADMIN_*` is redundant:
-admin is already seeded, `/setup` returns 410 anyway.
-
-Server-side comparison is constant-time, so an attacker watching
-response timings learns nothing about partial matches.
+> **Removed in M3.25**: `KEYWORDISTA_SETUP_TOKEN` (M3.21 defense-in-
+> depth for the HTTP `/setup` endpoint) was deleted alongside the
+> endpoint itself. Admin creation now happens out-of-band via the
+> `keywordista createsuperuser` CLI subcommand. No HTTP attack
+> surface means no token needed to gate it.
 
 ---
 

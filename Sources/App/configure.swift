@@ -90,9 +90,10 @@ public func configure(_ app: Application) async throws {
     case .envVarsNotProvided:
         app.logger.info("""
             admin bootstrap skipped: KEYWORDISTA_ADMIN_EMAIL / \
-            KEYWORDISTA_ADMIN_PASSWORD_HASH not set. First visitor to \
-            /api/v1/auth/setup will claim admin — restrict access via \
-            CDN/VPN until you complete first-run setup.
+            KEYWORDISTA_ADMIN_PASSWORD_HASH not set. No admin user \
+            will be auto-created — bootstrap one with \
+            `keywordista createsuperuser` (e.g. \
+            `docker exec -it <container> keywordista createsuperuser`).
             """)
     }
 
