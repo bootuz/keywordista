@@ -151,7 +151,13 @@ struct AppleSearchAdsClient: AppleSearchAdsClientProtocol {
             let startTime: String
             let endTime: String
             let timeZone = "ORTZ"  // ASA requires this for search-term reports
-            let returnRowTotals = false
+            // Apple's input validator requires AT LEAST ONE of
+            // `returnRowTotals: true` or a `granularity` value, otherwise
+            // /searchterms returns 400 INVALID_INPUT "needs to ask for
+            // rowTotals or granularity". We don't actually consume row
+            // totals (the Envelope ignores the field), but flipping this
+            // satisfies the validator without changing the per-row shape.
+            let returnRowTotals = true
             let returnGrandTotals = false
             let returnRecordsWithNoMetrics = false
             let selector: Selector
@@ -173,8 +179,15 @@ struct AppleSearchAdsClient: AppleSearchAdsClientProtocol {
                 let total: Total?
                 let metadata: Metadata?
             }
+            // Apple's v5 reports response wraps the rows under
+            // `data.reportingDataResponse.row` — NOT `data.row` directly.
+            // The previous decoder had an extra-level mismatch which was
+            // masked by other failures (missing orgId → 403, missing
+            // returnRowTotals → 400). With those resolved, the decoder
+            // now sees the real envelope shape.
             struct Reporting: Decodable { let row: [Row] }
-            let data: Reporting
+            struct DataBlock: Decodable { let reportingDataResponse: Reporting }
+            let data: DataBlock
         }
 
         let df = ISO8601DateFormatter()
@@ -195,7 +208,7 @@ struct AppleSearchAdsClient: AppleSearchAdsClientProtocol {
             as: Envelope.self
         )
 
-        return env.data.row.compactMap { row in
+        return env.data.reportingDataResponse.row.compactMap { row in
             // Skip the "other" rollup row that Apple sometimes returns.
             if row.other == true { return nil }
             guard

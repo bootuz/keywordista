@@ -90,26 +90,31 @@ struct AppleSearchAdsClientTests {
 
     @Test("decode parses the search-terms reporting envelope and skips the rollup row")
     func decoder_parsesEnvelope() async throws {
+        // Apple's actual v5 envelope wraps rows under
+        // data.reportingDataResponse.row — see AppleSearchAdsClient
+        // searchTermsReport()'s Envelope decoder for the contract.
         let json = #"""
         {
           "data": {
-            "row": [
-              {
-                "other": true,
-                "total": { "impressions": 999, "taps": 100 },
-                "metadata": {}
-              },
-              {
-                "other": false,
-                "total": { "impressions": 312, "taps": 48, "ttr": 0.15, "localSpend": { "amount": "7.50", "currency": "USD" } },
-                "metadata": { "searchTermText": "neet flashcards", "searchTermSource": "AUTO" }
-              },
-              {
-                "other": false,
-                "total": { "impressions": 89, "taps": 12, "ttr": 0.135 },
-                "metadata": { "searchTermText": "anki for medical", "searchTermSource": "AUTO" }
-              }
-            ]
+            "reportingDataResponse": {
+              "row": [
+                {
+                  "other": true,
+                  "total": { "impressions": 999, "taps": 100 },
+                  "metadata": {}
+                },
+                {
+                  "other": false,
+                  "total": { "impressions": 312, "taps": 48, "ttr": 0.15, "localSpend": { "amount": "7.50", "currency": "USD" } },
+                  "metadata": { "searchTermText": "neet flashcards", "searchTermSource": "AUTO" }
+                },
+                {
+                  "other": false,
+                  "total": { "impressions": 89, "taps": 12, "ttr": 0.135 },
+                  "metadata": { "searchTermText": "anki for medical", "searchTermSource": "AUTO" }
+                }
+              ]
+            }
           }
         }
         """#
