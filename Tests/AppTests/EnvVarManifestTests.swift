@@ -142,10 +142,12 @@ struct EnvVarManifestTests {
     @Suite("Contract integrity")
     struct ContractTests {
 
-        @Test("EnvVars.all contains 24 unique entries (the v1.0 contract size)")
+        @Test("EnvVars.all contains 23 unique entries (the v1.0 contract size)")
         func allHasExpectedShape() {
-            // 24 since M3.21 added KEYWORDISTA_SETUP_TOKEN.
-            #expect(EnvVars.all.count == 24, "if you added or removed an EnvVar, update this assertion AND docs/env-vars.md")
+            // 24 → 23 after M3.25 removed KEYWORDISTA_SETUP_TOKEN
+            // (M3.21 introduced it; M3.25 removed alongside the
+            // /api/v1/auth/setup endpoint).
+            #expect(EnvVars.all.count == 23, "if you added or removed an EnvVar, update this assertion AND docs/env-vars.md")
             let names = EnvVars.all.map(\.name)
             let unique = Set(names)
             #expect(names.count == unique.count, "EnvVars.all contains a duplicate name")
@@ -167,7 +169,7 @@ struct EnvVarManifestTests {
                 "DATABASE_URL",                         // contains password
                 "KEYWORDISTA_ENCRYPTION_KEY",
                 "KEYWORDISTA_ADMIN_PASSWORD_HASH",
-                "KEYWORDISTA_SETUP_TOKEN",              // M3.21
+                // M3.25: KEYWORDISTA_SETUP_TOKEN removed.
             ], "If you added a credential-type var, mark valueIsSecret AND update this assertion.")
         }
     }
@@ -278,10 +280,14 @@ struct EnvVarManifestTests {
 
         @Test("parseFailed.description redacts the raw value when valueIsSecret is true")
         func parseFailedRedactsSecretRawValues() {
+            // M3.25: sample-name updated to a still-extant secret var
+            // (encryption key) since SETUP_TOKEN is gone. The
+            // redaction logic itself is var-agnostic — it only reads
+            // `valueIsSecret` from the case payload.
             let secretErr = EnvVarError.parseFailed(
-                name: "KEYWORDISTA_SETUP_TOKEN",
+                name: "KEYWORDISTA_ENCRYPTION_KEY",
                 raw: "this-is-a-secret-value-that-should-not-leak-to-logs",
-                reason: "must be at least 16 characters",
+                reason: "must be 64 hex characters",
                 valueIsSecret: true
             )
             let desc = secretErr.description
@@ -292,10 +298,10 @@ struct EnvVarManifestTests {
             // so the operator can still tell roughly what went wrong.
             #expect(desc.contains("<redacted, 51 chars>"))
             // The reason must survive — it's the actionable bit.
-            #expect(desc.contains("must be at least 16 characters"))
+            #expect(desc.contains("must be 64 hex characters"))
             // The var name must survive — operator needs to know
             // which env var failed.
-            #expect(desc.contains("KEYWORDISTA_SETUP_TOKEN"))
+            #expect(desc.contains("KEYWORDISTA_ENCRYPTION_KEY"))
         }
 
         @Test("parseFailed.description shows raw value when valueIsSecret is false")
@@ -402,16 +408,16 @@ struct EnvVarManifestTests {
             #expect(adminEmail?.presence == "unset")
         }
 
-        @Test("versionEnv marks the four credential vars as secret")
+        @Test("versionEnv marks the three credential vars as secret")
         func versionEnvSecretFlagPropagates() {
             let m = Manifest(mode: .server)
             let entries = m.versionEnv(env: .fixture([:]))
             let secret = Set(entries.filter(\.valueIsSecret).map(\.name))
+            // M3.25: dropped from 4 → 3 after SETUP_TOKEN removal.
             #expect(secret == [
                 "DATABASE_URL",
                 "KEYWORDISTA_ENCRYPTION_KEY",
                 "KEYWORDISTA_ADMIN_PASSWORD_HASH",
-                "KEYWORDISTA_SETUP_TOKEN",          // M3.21
             ])
         }
     }

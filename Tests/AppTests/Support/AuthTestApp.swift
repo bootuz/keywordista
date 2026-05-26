@@ -34,11 +34,9 @@ enum AuthTestApp {
     /// Build a fully-wired test Application. Caller is responsible
     /// for `try await app.asyncShutdown()` (use defer).
     ///
-    /// - Parameter setupToken: M3.21 — when non-nil, the AuthController
-    ///   requires this value in `X-Keywordista-Setup-Token` on the
-    ///   /auth/setup request. Default nil = pre-M3.21 behavior so
-    ///   existing tests don't have to change.
-    static func make(setupToken: String? = nil) async throws -> Application {
+    /// M3.25: the `setupToken` parameter (M3.21) was removed
+    /// alongside the /setup HTTP endpoint and SETUP_TOKEN env var.
+    static func make() async throws -> Application {
         let app = try await Application.make(.testing)
 
         // ── Storage: in-memory SQLite ────────────────────────────
@@ -65,8 +63,7 @@ enum AuthTestApp {
             // protected route surface — local-mode integration
             // (auth-UI hidden, no middleware) is verified
             // separately via routes.swift code review.
-            mode: .server,
-            setupToken: setupToken
+            mode: .server
         )
         authController.register(on: api.grouped("auth"))
 
@@ -98,21 +95,41 @@ enum AuthTestApp {
 
     // MARK: - Setup helpers
     //
-    // These compress the "build app → POST setup → grab cookie" ritual
-    // that prefaces almost every test into one line. Tests focus on
-    // what's unique (the actual assertion) instead of repeating the
-    // ritual.
+    // These compress the "build app → seed admin → POST login → grab
+    // cookie" ritual that prefaces almost every test into one line.
+    // Tests focus on what's unique (the actual assertion) instead of
+    // repeating the ritual.
 
-    /// Posts /auth/setup with a fresh admin and returns the resulting
-    /// session cookie. The app already has the seeded admin row.
+    /// Seeds an admin user directly via Fluent and returns a session
+    /// cookie obtained via POST /auth/login. Doesn't go through the
+    /// HTTP /auth/setup endpoint — that endpoint was removed in M3.25
+    /// when admin creation moved to the `createsuperuser` CLI.
+    ///
+    /// Tests that need an authenticated session call this; tests that
+    /// specifically want to exercise login error paths construct
+    /// their own flow.
     static func setupAdmin(
         on app: Application,
         email: String = "admin@test.local",
         password: String = "admin-password-12"
     ) async throws -> String {
+        // Direct DB insert — mirrors what the createsuperuser CLI
+        // does, but synchronous and via the same hasher the tests
+        // already configure (cost 4 = fast enough for the suite).
+        let hasher = try PasswordHasher(cost: bcryptCost)
+        let user = User(
+            email: email,
+            passwordHash: try await hasher.hash(password),
+            role: .admin
+        )
+        try await user.save(on: app.db)
+
+        // Now log in via the HTTP endpoint to obtain a real cookie
+        // (the cookie machinery + Set-Cookie shape are part of what
+        // the downstream tests need to exercise).
         var cookie: String?
         try await app.test(
-            .POST, "/api/v1/auth/setup",
+            .POST, "/api/v1/auth/login",
             beforeRequest: { req in
                 try req.content.encode(["email": email, "password": password])
             },
@@ -121,9 +138,6 @@ enum AuthTestApp {
             }
         )
         guard let token = cookie else {
-            // swift-testing's #require is a macro that only works
-            // inside @Test functions; for helpers throw a typed
-            // error the test can attribute.
             throw AuthTestAppError.setupNoCookie
         }
         return token

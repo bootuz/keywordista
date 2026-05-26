@@ -52,12 +52,10 @@ func routes(_ app: Application, manifest: Manifest) throws {
         hasher: try PasswordHasher(cost: try manifest.require(EnvVars.bcryptCost)),
         sessionTTLDays: try manifest.require(EnvVars.sessionTTLDays),
         inviteTTLDays: try manifest.require(EnvVars.inviteTTLDays),
-        mode: manifest.mode,
-        // M3.21: defense-in-depth for the /setup race window. nil →
-        // pre-M3.21 behavior. Optional because the cockpit's pre-baked
-        // admin path (M3.17 AdminBootstrap) closes the same hole and
-        // doesn't need a token. Raw-docker users should set this.
-        setupToken: try manifest.optional(EnvVars.setupToken)
+        mode: manifest.mode
+        // M3.25: M3.21's setupToken arg removed alongside the /setup
+        // endpoint deletion. Admin creation moved to the
+        // `keywordista createsuperuser` CLI subcommand.
     )
     authController.register(on: api.grouped("auth"))
 

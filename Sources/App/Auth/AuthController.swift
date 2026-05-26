@@ -1,4 +1,3 @@
-import Crypto
 import Fluent
 import Foundation
 import Vapor
@@ -47,90 +46,34 @@ struct AuthController {
     /// backend can render the dashboard directly, no login UI).
     let mode: RuntimeMode
 
-    /// M3.21: optional defense-in-depth for the `/setup` race window.
-    /// When non-nil, `POST /auth/setup` requires the matching value
-    /// in the `X-Keywordista-Setup-Token` header. nil = pre-M3.21
-    /// behavior (anyone can hit /setup before the first user exists).
-    /// Inert once the users table has any row (setup returns 410
-    /// independent of the token).
-    ///
-    /// **Comparison is constant-time** (via Crypto's `safeCompare`)
-    /// to defeat timing-based brute force during the boot window.
-    let setupToken: String?
-
-    /// Header name pinned as a const for both the route handler and
-    /// the response-side `setupTokenRequired` field of /auth/state
-    /// so the SPA can match.
-    static let setupTokenHeader = "X-Keywordista-Setup-Token"
-
     init(
         hasher: PasswordHasher,
         sessionTTLDays: Int,
         inviteTTLDays: Int,
-        mode: RuntimeMode,
-        setupToken: String? = nil
+        mode: RuntimeMode
     ) {
         self.hasher = hasher
         self.sessionTTLDays = sessionTTLDays
         self.inviteTTLDays = inviteTTLDays
         self.mode = mode
-        self.setupToken = setupToken
     }
 
     /// Registers all auth routes under `/api/v1/auth/*`.
     /// M1.10's routes.swift calls this with the `/api/v1/auth` group.
+    ///
+    /// **M3.25**: `POST /setup` is GONE. Admin creation moved
+    /// out-of-band to the `keywordista createsuperuser` CLI subcommand
+    /// (raw-docker path) and the M3.17 `AdminBootstrap` env-var path
+    /// (cockpit path). Removing the HTTP endpoint closes the
+    /// takeover-during-boot attack surface that M3.21's SETUP_TOKEN
+    /// was defending — defense in depth is no longer needed because
+    /// the depth itself is structural.
     func register(on routes: any RoutesBuilder) {
-        routes.post("setup", use: setup)
         routes.post("login", use: login)
         routes.post("logout", use: logout)
         routes.post("accept-invite", use: acceptInvite)
         routes.get("invite", ":token", use: validateInvite)
         routes.get("state", use: state)
-    }
-
-    // MARK: - POST /setup
-
-    /// First-run admin creation. Returns 410 Gone the moment any
-    /// user exists in the DB — the only way to reset is by deleting
-    /// every user (manual DB surgery). This is the correct security
-    /// posture: a public `/setup` endpoint on a running deployment
-    /// would be a takeover vector.
-    ///
-    /// M3.21: when `setupToken` is configured, the request must carry
-    /// the matching value in `X-Keywordista-Setup-Token`. We check
-    /// the token BEFORE counting users so a misconfigured request
-    /// gets 401 even after first-run completes (rather than leaking
-    /// "you're at the right place but it's already set up" as 410).
-    func setup(req: Request) async throws -> Response {
-        if let expected = setupToken {
-            let provided = req.headers.first(name: Self.setupTokenHeader) ?? ""
-            // Constant-time compare — defeats timing attacks during
-            // the deploy window where the token is the only thing
-            // between a passing scanner and an admin account.
-            // Using HMAC.isValidAuthenticationCode would be overkill;
-            // safeCompare from swift-crypto's underlying NIO source is
-            // not exposed publicly so we implement it inline.
-            guard constantTimeEqual(expected, provided) else {
-                throw Abort(.unauthorized, reason: "invalid setup token")
-            }
-        }
-
-        if try await User.query(on: req.db).count() > 0 {
-            throw Abort(.gone, reason: "setup already complete; use /auth/login")
-        }
-
-        let input = try req.content.decode(CredentialsRequest.self)
-        let email = try AuthInputs.validateEmail(input.email)
-        try AuthInputs.validatePassword(input.password)
-
-        let user = User(
-            email: email,
-            passwordHash: try await hasher.hash(input.password),
-            role: .admin
-        )
-        try await user.save(on: req.db)
-
-        return try await issueSessionResponse(for: user, req: req, status: .created)
     }
 
     // MARK: - POST /login
@@ -327,69 +270,8 @@ struct AuthController {
         return AuthStateResponse(
             mode: mode.rawValue,
             firstRun: firstRun,
-            // M3.21: tell the SPA whether the setup wizard needs the
-            // extra token field. Surfacing this is acceptable —
-            // learning "this deploy uses a token" gives an attacker
-            // nothing actionable (still need to brute-force 16+
-            // chars during the boot window, which is infeasible).
-            setupTokenRequired: setupToken != nil,
             signedIn: currentUser != nil,
             user: currentUser.map(UserResponse.init(user:))
-        )
-    }
-
-    // MARK: - Constant-time string compare
-
-    /// M3.21: timing-safe string equality for the setup token check.
-    /// `==` on String short-circuits on the first byte mismatch,
-    /// leaking token length and prefix to a network attacker who
-    /// can time requests.
-    ///
-    /// **M3.24b — Implementation note.** The original M3.21 impl was
-    /// a hand-rolled XOR-accumulate loop. Swift offers no `volatile`
-    /// and no guarantee that the compiler won't elide a dead-store-
-    /// equivalent accumulation, which made the loop optimization-
-    /// fragile in Release builds (and exactly the kind of thing
-    /// that silently regresses across compiler versions).
-    ///
-    /// This version uses `HMAC<SHA256>.isValidAuthenticationCode`,
-    /// which is documented constant-time and is the standard idiom
-    /// in swift-crypto for exactly this use case. We:
-    ///
-    ///   1. Generate an ephemeral random SymmetricKey per call
-    ///      (256-bit; the per-call key prevents the attacker from
-    ///      precomputing anything across requests).
-    ///   2. Compute HMAC(a) under that key.
-    ///   3. Verify the same HMAC against b under the same key.
-    ///   4. Verification succeeds iff a and b have identical UTF-8
-    ///      byte content (HMAC is collision-resistant; the chance
-    ///      of two different bytes hashing to the same MAC is
-    ///      cryptographically negligible).
-    ///
-    /// Operates on UTF-8 bytes — tokens are ASCII (hex/base64) by
-    /// convention, sidesteps Swift String's canonical equivalence.
-    ///
-    /// **Length-leak posture is unchanged from M3.21.** If lhs/rhs
-    /// are different lengths, both HMACs still get computed (HMAC
-    /// works on arbitrary-length input), so the length difference
-    /// shows up as timing variance in the *HMAC computation step*,
-    /// not in the comparison step. Equivalent to before: 16-char
-    /// minimum keeps the unknown content ≥ ~96 bits even given the
-    /// length.
-    ///
-    /// **Internal access** so `ConstantTimeEqualTests` can target it
-    /// directly via `@testable import`. Pure function, no instance
-    /// state, no I/O — promotion to `static func` would be reasonable
-    /// but the original signature is kept to minimize blast radius.
-    func constantTimeEqual(_ a: String, _ b: String) -> Bool {
-        let aBytes = Array(a.utf8)
-        let bBytes = Array(b.utf8)
-        let key = SymmetricKey(size: .bits256)
-        let aMAC = HMAC<SHA256>.authenticationCode(for: aBytes, using: key)
-        return HMAC<SHA256>.isValidAuthenticationCode(
-            aMAC,
-            authenticating: bBytes,
-            using: key
         )
     }
 
@@ -468,12 +350,13 @@ struct AuthSuccessResponse: Content {
 struct AuthStateResponse: Content {
     /// "local" or "server". The SPA hides every auth UI in local mode.
     let mode: String
+    /// M3.25 — `firstRun` is true when the `users` table is empty.
+    /// The SPA renders `BootstrapInstructions` (with the docker exec
+    /// recipe) instead of the login page when this is true. Distinct
+    /// from M3.21's removed `setupTokenRequired`: now there's no
+    /// HTTP path to bootstrap, so the SPA's job is to TELL the
+    /// operator what to do, not to walk them through it.
     let firstRun: Bool
-    /// M3.21: when true, the SetupWizard SPA renders an extra
-    /// "Setup token" field and the request must carry the value
-    /// in `X-Keywordista-Setup-Token`. Mirrors the server-side
-    /// `setupToken != nil` check.
-    let setupTokenRequired: Bool
     let signedIn: Bool
     let user: UserResponse?
 }
