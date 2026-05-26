@@ -1,7 +1,7 @@
 // Typed client for the auth + user-management API surface
 // (Sources/App/Auth/*.swift). Mirrors the per-controller boundaries:
 //
-//   AuthController  → getAuthState, setupAdmin, login, logout,
+//   AuthController  → getAuthState, login, logout,
 //                     validateInvite, acceptInvite
 //   UsersController → listUsers, inviteUser, revokeUser, changeRole
 //
@@ -32,27 +32,12 @@ import type {
 export const getAuthState = () =>
   apiFetch<AuthState>('/auth/state');
 
-/// First-run admin creation. Server returns 410 if any user already
-/// exists — callers should treat 410 as "race condition, push to
-/// /login instead." The success path sets a session cookie.
-///
-/// M3.21: when the deployment was booted with KEYWORDISTA_SETUP_TOKEN,
-/// the request must carry it in `X-Keywordista-Setup-Token`. The SPA
-/// learns this is required via getAuthState().setupTokenRequired and
-/// passes the operator-supplied value via the `setupToken` arg.
-/// Server returns 401 if the token is missing/wrong.
-export const setupAdmin = (
-  email: string,
-  password: string,
-  setupToken?: string,
-) =>
-  apiFetch<AuthSuccess>('/auth/setup', {
-    method: 'POST',
-    headers: setupToken
-      ? { 'X-Keywordista-Setup-Token': setupToken }
-      : undefined,
-    body: JSON.stringify({ email, password }),
-  });
+// M3.25 — `setupAdmin()` is gone. The POST /api/v1/auth/setup
+// endpoint was removed alongside SetupWizard.svelte; admin creation
+// now happens out-of-band via the `keywordista createsuperuser` CLI
+// (raw-docker path) or the M3.17 AdminBootstrap env-var path
+// (cockpit). The SPA's BootstrapInstructions.svelte renders the
+// docker-exec recipe when firstRun=true.
 
 /// Generic 401 on any failure (server doesn't distinguish "user not
 /// found" from "wrong password" — that's the anti-enumeration design).

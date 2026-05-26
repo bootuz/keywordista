@@ -143,17 +143,15 @@ export interface UserSummary {
 
 /// Response shape of GET /api/v1/auth/state.
 /// Drives every routing decision in the SPA — local-mode renders
-/// Dashboard directly (no auth UI), firstRun pushes to SetupWizard,
+/// Dashboard directly (no auth UI), firstRun pushes to
+/// BootstrapInstructions (M3.25 — was SetupWizard pre-M3.25),
 /// signedIn=false (server mode) pushes to LoginPage.
 export interface AuthState {
   mode: RuntimeMode;
+  /// True when the `users` table is empty. SPA shows the bootstrap-
+  /// instructions page (with the docker-exec createsuperuser recipe)
+  /// when true. Flips to false once any admin exists.
   firstRun: boolean;
-  /// M3.21: when true, the deployment was booted with
-  /// KEYWORDISTA_SETUP_TOKEN set, so SetupWizard must collect the
-  /// token + the request must carry it in
-  /// `X-Keywordista-Setup-Token`. Surfaces server-side defense-in-
-  /// depth for raw-docker-run users who can't pre-seed an admin.
-  setupTokenRequired: boolean;
   signedIn: boolean;
   user: UserSummary | null;
 }
