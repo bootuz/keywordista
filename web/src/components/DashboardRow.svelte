@@ -76,7 +76,14 @@
   <td class="px-3 py-2">
     <div class="flex items-center gap-1">
       {#each row.topResults as r}
-        <AppIcon src={r.iconURL} alt={r.name} size={24} />
+        <a
+          href="https://apps.apple.com/{row.countryCode}/app/id{r.appStoreId}"
+          target="_blank"
+          rel="noopener noreferrer"
+          title={r.name}
+        >
+          <AppIcon src={r.iconURL} alt={r.name} size={24} />
+        </a>
       {/each}
     </div>
   </td>
