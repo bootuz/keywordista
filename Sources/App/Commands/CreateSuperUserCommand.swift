@@ -36,8 +36,15 @@ import Vapor
 /// Scripted (CI, automated provisioning):
 /// ```text
 /// $ echo "hunter2-very-long" | keywordista createsuperuser \
-///       --email=ops@studio.example.com --password-from-stdin
+///       --email ops@studio.example.com --password-from-stdin
 /// ```
+///
+/// **Note on argument syntax.** ConsoleKit's `CommandInput` parser
+/// accepts `--flag value` (space-separated) but **not** `--flag=value`
+/// (equals-separated). The latter raises `unknownInput`. Modern CLIs
+/// like cargo / kubectl handle both; ConsoleKit's older convention is
+/// space-only. Document space-separated form in every operator-facing
+/// surface (help, README, deploy docs) to match what actually works.
 ///
 /// We deliberately do NOT accept `--password=<plaintext>` — plaintext
 /// passwords on the command line leak to `ps`, shell history, and
@@ -86,7 +93,7 @@ struct CreateSuperUserCommand: AsyncCommand {
     }
 
     var help: String {
-        "Create an admin user (Django-style). Prompts for email + password by default; supports --email and --password-from-stdin for scripting."
+        "Create an admin user (Django-style). Prompts for email + password by default; supports `--email <addr> --password-from-stdin` (space-separated) for scripting."
     }
 
     /// Bcrypt cost. Injected at command-registration time so the
