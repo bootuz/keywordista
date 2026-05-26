@@ -101,6 +101,27 @@ export interface SuggestionRow {
   currentRank: number | null;
 }
 
+// Aggregated counters for Apple's LOW_VOLUME placeholder rows. Apple
+// anonymizes individual search terms when their underlying query volume
+// is below a k-anonymity threshold — the impressions/taps are still real
+// and billable, but the term text is replaced with the literal
+// "LOW_VOLUME". The Related panel surfaces these totals as a banner so
+// the user knows the campaign is producing signal even when no single
+// term passes the relevance filter.
+export interface AnonymizedSummary {
+  impressions: number;
+  taps: number;
+  /// Number of campaign × match-type combos that contributed a
+  /// LOW_VOLUME row.
+  sourceCount: number;
+}
+
+// Shape of GET /api/v1/keywords/:id/suggestions.
+export interface SuggestionsResponse {
+  rows: SuggestionRow[];
+  anonymized: AnonymizedSummary | null;
+}
+
 // Chart-position watchdog DTOs. Mirror Sources/App/Controllers/ChartsController.swift.
 
 export interface ChartPosition {

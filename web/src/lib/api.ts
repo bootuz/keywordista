@@ -9,7 +9,7 @@ import type {
   ASCStatus,
   ASAStatus,
   DeveloperKeywordsResponse,
-  SuggestionRow,
+  SuggestionsResponse,
   ChartPosition,
   ChartEvent,
 } from './types';
@@ -128,10 +128,12 @@ export const getDeveloperKeywords = () =>
   apiFetch<DeveloperKeywordsResponse>('/settings/asc/keywords');
 
 // Mines Apple Search Ads search-term reports for terms related to this
-// tracked keyword. Returns [] when ASA isn't configured, no campaigns serve
-// the seed's storefront, or the campaign hasn't accumulated data yet.
+// tracked keyword. Returns `{ rows: [], anonymized: null }` when ASA isn't
+// configured, no campaigns serve the seed's storefront, or the campaign
+// hasn't accumulated data yet. `anonymized` carries totals for Apple's
+// LOW_VOLUME privacy-aggregated rows when any are present.
 export const getKeywordSuggestions = (id: string) =>
-  apiFetch<SuggestionRow[]>(`/keywords/${id}/suggestions`);
+  apiFetch<SuggestionsResponse>(`/keywords/${id}/suggestions`);
 
 export const getASASettings = () => apiFetch<ASAStatus>('/settings/asa');
 export const putASASettings = (body: { clientId: string; clientSecret?: string; orgId?: string }) =>

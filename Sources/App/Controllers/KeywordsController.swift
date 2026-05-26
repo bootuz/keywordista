@@ -74,7 +74,7 @@ struct KeywordsController: RouteCollection {
         try await req.queueStatusService().status()
     }
 
-    @Sendable func suggestions(req: Request) async throws -> [SuggestionRow] {
+    @Sendable func suggestions(req: Request) async throws -> SuggestionsResponse {
         guard let id = req.parameters.get("id", as: UUID.self) else { throw Abort(.badRequest) }
         do {
             return try await req.keywordSuggestionService().suggest(seedKeywordId: id)
