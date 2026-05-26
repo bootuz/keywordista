@@ -6,45 +6,11 @@ import SQLKit
 import Vapor
 
 public func configure(_ app: Application) async throws {
-    // ── Env-var contract ──────────────────────────────────────────────
-    //
-    // Resolve and validate the §4.6.3 env-var contract once at boot,
-    // BEFORE any other init. Missing-required-var failures surface here
-    // with a clear "KEYWORDISTA_X is required in server mode" message —
-    // far less confusing than discovering halfway through migration
-    // setup that ENCRYPTION_KEY is missing. See Sources/App/Config/
-    // EnvVarManifest.swift for the typed accessors.
     let manifest = try Manifest.bootstrap()
 
-    // ── Default bind address & port ───────────────────────────────────
-    //
-    // Server mode → 0.0.0.0 (public PaaS deploy: container needs to
-    // accept connections from the provider's load balancer);
-    // local mode → 127.0.0.1 (Mac menubar spawn: only the local
-    // browser talks to it).
-    //
-    // The menubar app's ServiceSupervisor still passes the explicit
-    // `--hostname 127.0.0.1 --port <chosen>` CLI flags. Vapor's CLI
-    // flags override these defaults if both are set, so behavior for
-    // the existing menubar path is unchanged.
     app.http.server.configuration.hostname = try manifest.require(EnvVars.hostname)
     app.http.server.configuration.port = try manifest.require(EnvVars.port)
 
-    // ── JSON date precision ────────────────────────────────────────────
-    //
-    // Vapor's default .iso8601 strategy emits dates with whole-second
-    // precision ("2026-05-21T23:21:53Z"). The SPA captures a ms-precision
-    // `startedAt` at click time and waits for the row's `checkedAt` to
-    // catch up; if the parsed-back `checkedAt` truncates to the same
-    // wall-clock second, the comparison never succeeds and the refresh
-    // spinner spins forever. Switch the whole JSON layer to fractional-
-    // seconds ISO 8601 so the round-trip preserves the precision SQLite
-    // already stores. See web/src/lib/stores.ts reconcile() for the other
-    // side of this contract.
-    //
-    // Formatters are constructed inside each closure because
-    // ISO8601DateFormatter isn't Sendable; the allocation cost is trivial
-    // compared to JSON encoding itself.
     let jsonEncoder = JSONEncoder()
     jsonEncoder.dateEncodingStrategy = .custom { date, encoder in
         let formatter = ISO8601DateFormatter()
@@ -60,8 +26,7 @@ public func configure(_ app: Application) async throws {
         let primary = ISO8601DateFormatter()
         primary.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = primary.date(from: str) { return date }
-        // Belt-and-suspenders: accept the legacy second-precision form so
-        // an old curl one-liner in the README still posts dates cleanly.
+
         let legacy = ISO8601DateFormatter()
         legacy.formatOptions = [.withInternetDateTime]
         if let date = legacy.date(from: str) { return date }
@@ -74,40 +39,17 @@ public func configure(_ app: Application) async throws {
     ContentConfiguration.global.use(encoder: jsonEncoder, for: .json)
     ContentConfiguration.global.use(decoder: jsonDecoder, for: .json)
 
-    // Public directory: the menubar app supervisor sets KEYWORDISTA_PUBLIC_DIR
-    // to point at the bundled (or downloaded) SPA assets in its data dir.
-    // When unset (dev / source builds), fall back to Vapor's convention.
-    // FileMiddleware wants a trailing slash; tolerate either form from the
-    // env var.
     let rawPublicDir = try manifest.optional(EnvVars.publicDir) ?? app.directory.publicDirectory
     let publicDir = rawPublicDir.hasSuffix("/") ? rawPublicDir : rawPublicDir + "/"
 
-    // Static files (Public/) — serves built SPA assets in production.
-    // Runs before routing: any GET that matches a file in Public/ short-circuits.
     app.middleware.use(FileMiddleware(publicDirectory: publicDir))
-
-    // SPA fallback — runs last; converts non-API 404 GETs into index.html so
-    // client-side routes (refresh on /dashboard, /settings, etc.) keep working.
     app.middleware.use(SPAFallbackMiddleware(indexPath: publicDir + "index.html"))
 
-    // Database driver. Routes per §4.10: DATABASE_URL → Postgres,
-    // otherwise SQLite at DATABASE_PATH. Local mode (menubar-spawned)
-    // always resolves to SQLite. Driver-specific tuning (SQLite PRAGMAs)
-    // is encapsulated in DatabaseProvider and a no-op for Postgres.
     let database = try DatabaseProvider.resolve(from: manifest)
     try database.register(on: app)
     try await database.applyDriverSpecificTuning(on: app)
-    // Stash the resolved provider so BackupController (M1.11) can
-    // ask "am I SQLite or Postgres?" without re-resolving from the
-    // manifest. Same pattern as app.secretBox.
     app.databaseProvider = database
 
-    // Encryption-at-rest (M1.9). Resolve the runtime SecretBox once
-    // here so the M1.9 migration AND every per-request SettingsService
-    // construction share the same key. In local mode the key derives
-    // from IOPlatformUUID (deterministic across boots on the same
-    // Mac); in server mode it comes from KEYWORDISTA_ENCRYPTION_KEY
-    // (manifest already validated required-in-server-mode).
     let encryptionKey = try EncryptionKeyResolver.resolve(
         mode: manifest.mode,
         explicit: try manifest.optional(EnvVars.encryptionKey)
@@ -135,29 +77,14 @@ public func configure(_ app: Application) async throws {
 
     try await app.autoMigrate()
 
-    // ── Admin bootstrap (closes the auth-takeover hole) ──────────────
-    //
-    // CRITICAL ORDERING: this MUST run before routes() so the HTTP
-    // server can't start accepting /api/v1/auth/setup requests until
-    // either:
-    //   (a) the cockpit-supplied admin user is seeded, OR
-    //   (b) we've logged that no env-var admin was supplied (raw
-    //       docker run, the operator will use the in-browser wizard).
-    //
-    // Without this, cockpit-deployed instances on predictable
-    // *.onrender.com subdomains leave /setup open during the boot
-    // window — any visitor claims admin. See AdminBootstrap.swift
-    // for the full security rationale.
     let bootstrapOutcome = try await AdminBootstrap.run(
         manifest: manifest,
         on: app.db,
         logger: app.logger
     )
-    // Log every outcome at info+ for ops visibility — the security
-    // story is "this deployment's first-run posture is X."
     switch bootstrapOutcome {
     case .seeded:
-        break   // AdminBootstrap.run already logged at .notice
+        break
     case .alreadyHasUsers:
         app.logger.info("admin bootstrap skipped: users table not empty")
     case .envVarsNotProvided:
@@ -169,11 +96,6 @@ public func configure(_ app: Application) async throws {
             """)
     }
 
-    // Boot-time auth-session sweep: DELETE rows whose expiresAt has
-    // already passed. In local mode this is a no-op (no sessions
-    // ever created); in server mode it keeps the table from growing
-    // unbounded with abandoned sessions from forgotten devices.
-    // Logged at info level for ops visibility on real deployments.
     let purged = try await AuthSession.purgeExpired(on: app.db)
     if purged > 0 {
         app.logger.info("purged \(purged) expired auth session(s) at boot")
@@ -191,20 +113,10 @@ public func configure(_ app: Application) async throws {
     app.queues.schedule(DailyRefreshScheduler())
         .daily()
         .at("3:00am")
-    // Chart-position watchdog. Lands one hour after the keyword refresh so
-    // it doesn't pile on top of iTunes simultaneously, and 4 hours after
-    // Apple's midnight-PT chart refresh window so the RSS feeds are settled.
     app.queues.schedule(RefreshChartsScheduler())
         .daily()
         .at("4:00am")
 
-    // Serial worker. The original plan called for "~1 req/sec to iTunes"
-    // to stay below Apple's edge throttling; running multiple workers in
-    // parallel both flooded iTunes (yielding 504 timeouts) AND fought each
-    // other for SQLite write locks (yielding "database is locked" errors).
-    // workerCount=1 = at-most-one RefreshKeywordJob in flight at a time;
-    // the FluentDriver's poll interval (default 1s) gives the polite pacing
-    // for free.
     app.queues.configuration.workerCount = 1
 
     try app.queues.startInProcessJobs(on: .default)
