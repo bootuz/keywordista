@@ -24,6 +24,7 @@ final class InstanceLifecycleTests: XCTestCase {
         func availableDatabases(account: ProviderAccount, token: String) async throws -> [DatabaseOption] { [] }
         func estimateMonthlyCost(spec: DeploymentSpec) -> Money { .zero }
         func validateServiceName(_ name: String) -> ServiceNameValidation { .ok }
+        func publicURLPattern(serviceName: String) -> URL? { nil }   // M3.22
         func createService(spec: DeploymentSpec, token: String) async throws -> ProviderService { fatalError() }
         func streamDeployEvents(service: ProviderService, token: String) -> AsyncStream<DeployEvent> {
             AsyncStream { $0.finish() }

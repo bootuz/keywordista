@@ -128,7 +128,16 @@ public struct EnvVar<Value: Sendable>: EnvVarSpec, Sendable {
 
 public enum EnvVarError: Error, CustomStringConvertible {
     case missingRequired(name: String, mode: RuntimeMode)
-    case parseFailed(name: String, raw: String, reason: String)
+    /// M3.24c: `valueIsSecret` lets the description redact the raw
+    /// value when the var carries secret material (token, key, hash).
+    /// Pre-M3.24c this case logged the first 40 chars of `raw` for
+    /// every var, leaking secrets to ops logs (and downstream log
+    /// drains) when the operator misconfigured them — e.g. pasting
+    /// a 15-char SETUP_TOKEN would put the near-complete secret into
+    /// the Render Logs tab. Now we substitute "<redacted, N chars>"
+    /// for secrets while keeping the count + the reason intact so the
+    /// remediation hint stays actionable.
+    case parseFailed(name: String, raw: String, reason: String, valueIsSecret: Bool)
     /// `KEYWORDISTA_MODE` is unset. Distinct from `missingRequired` because
     /// the mode itself can't be "required in a mode" (the chicken-and-egg
     /// from `bootstrap`) — its own absence is a fatal, mode-independent
@@ -140,8 +149,11 @@ public enum EnvVarError: Error, CustomStringConvertible {
         switch self {
         case .missingRequired(let name, let mode):
             return "env var \(name) is required in \(mode.rawValue) mode but is not set"
-        case .parseFailed(let name, let raw, let reason):
-            return "env var \(name)=\(raw.prefix(40)) failed to parse: \(reason)"
+        case .parseFailed(let name, let raw, let reason, let valueIsSecret):
+            let display = valueIsSecret
+                ? "<redacted, \(raw.count) chars>"
+                : String(raw.prefix(40))
+            return "env var \(name)=\(display) failed to parse: \(reason)"
         case .modeNotSet:
             return """
                 KEYWORDISTA_MODE must be set explicitly to 'local' or 'server'.
@@ -406,7 +418,7 @@ public enum EnvVars {
 
     public static let adminEmail = EnvVar<String>(
         name: "KEYWORDISTA_ADMIN_EMAIL",
-        description: "If set with KEYWORDISTA_ADMIN_PASSWORD_HASH and the users table is empty at boot, seeds an admin user. The cockpit uses this for pre-baked-credentials deploys.",
+        description: "If set with KEYWORDISTA_ADMIN_PASSWORD_HASH and the users table is empty at boot, seeds an admin user. The cockpit uses this for pre-baked-credentials deploys; raw-docker operators usually prefer `keywordista createsuperuser` after boot instead.",
         defaults: { _ in nil },
         defaultDescription: { _ in nil },
         parse: Parsers.email
@@ -420,6 +432,12 @@ public enum EnvVars {
         defaultDescription: { _ in nil },
         parse: Parsers.bcryptHash
     )
+
+    // M3.25 — KEYWORDISTA_SETUP_TOKEN was removed alongside the
+    // /api/v1/auth/setup HTTP endpoint. Admin creation now happens
+    // out-of-band via the `keywordista createsuperuser` CLI
+    // subcommand (raw-docker path) or M3.17 AdminBootstrap (cockpit
+    // path). With no /setup endpoint to gate, no token is needed.
 
     // ── Sign-up & auth policy ───────────────────────────────────
 
@@ -592,7 +610,12 @@ public struct Manifest: Sendable {
         do {
             resolvedMode = try EnvVars.mode.parse(modeRaw)
         } catch {
-            throw EnvVarError.parseFailed(name: EnvVars.mode.name, raw: modeRaw, reason: "\(error)")
+            throw EnvVarError.parseFailed(
+                name: EnvVars.mode.name,
+                raw: modeRaw,
+                reason: "\(error)",
+                valueIsSecret: EnvVars.mode.valueIsSecret    // false — mode is "local"/"server"
+            )
         }
 
         let manifest = Manifest(mode: resolvedMode)
@@ -606,7 +629,14 @@ public struct Manifest: Sendable {
     public func require<T>(_ envVar: EnvVar<T>, env: ManifestEnv = .processEnv) throws -> T {
         if let raw = env.get(envVar.name) {
             do { return try envVar.parse(raw) }
-            catch { throw EnvVarError.parseFailed(name: envVar.name, raw: raw, reason: "\(error)") }
+            catch {
+                throw EnvVarError.parseFailed(
+                    name: envVar.name,
+                    raw: raw,
+                    reason: "\(error)",
+                    valueIsSecret: envVar.valueIsSecret    // M3.24c: redact secrets in logs
+                )
+            }
         }
         if let v = envVar.defaults(mode) { return v }
         throw EnvVarError.missingRequired(name: envVar.name, mode: mode)
@@ -617,7 +647,14 @@ public struct Manifest: Sendable {
     public func optional<T>(_ envVar: EnvVar<T>, env: ManifestEnv = .processEnv) throws -> T? {
         if let raw = env.get(envVar.name) {
             do { return try envVar.parse(raw) }
-            catch { throw EnvVarError.parseFailed(name: envVar.name, raw: raw, reason: "\(error)") }
+            catch {
+                throw EnvVarError.parseFailed(
+                    name: envVar.name,
+                    raw: raw,
+                    reason: "\(error)",
+                    valueIsSecret: envVar.valueIsSecret    // M3.24c: redact secrets in logs
+                )
+            }
         }
         return envVar.defaults(mode)
     }
@@ -738,6 +775,13 @@ private protocol TypedEnvVarSpec {
 extension EnvVar: TypedEnvVarSpec {
     fileprivate func parseAndDiscard(raw: String) throws {
         do { _ = try parse(raw) }
-        catch { throw EnvVarError.parseFailed(name: name, raw: raw, reason: "\(error)") }
+        catch {
+            throw EnvVarError.parseFailed(
+                name: name,
+                raw: raw,
+                reason: "\(error)",
+                valueIsSecret: valueIsSecret    // M3.24c
+            )
+        }
     }
 }

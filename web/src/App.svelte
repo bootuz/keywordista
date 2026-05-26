@@ -90,7 +90,7 @@
     if (state.mode === 'local') {
       if (
         path === ROUTES.login
-        || path === ROUTES.setup
+        || path === ROUTES.bootstrap     // M3.25: was ROUTES.setup
         || path === ROUTES.usersAdmin
       ) {
         return ROUTES.dashboard;
@@ -98,29 +98,32 @@
       return null;
     }
 
-    // ── Server mode, first run: force /setup. ─────────────────────
-    // No user exists yet; every path except /setup itself is
-    // useless until an admin is created. We don't allow /invite/*
-    // here because invites are issued by users, and there are none.
+    // ── Server mode, first run: force /bootstrap. ─────────────────
+    // No user exists yet; every path except /bootstrap itself is
+    // useless until an admin is created via the createsuperuser
+    // CLI (M3.25). /invite/* doesn't apply here either — invites
+    // are issued by users, and there are none.
     if (state.firstRun) {
-      return path === ROUTES.setup ? null : ROUTES.setup;
+      return path === ROUTES.bootstrap ? null : ROUTES.bootstrap;
     }
 
-    // ── Server mode, setup done. ──────────────────────────────────
+    // ── Server mode, admin exists. ────────────────────────────────
     const isPublicAuthRoute =
       path === ROUTES.login
-      || path === ROUTES.setup
+      || path === ROUTES.bootstrap
       || path.startsWith('/invite/');
 
-    // Signed-in user revisiting auth pages → bounce to dashboard.
-    if (state.signedIn && (path === ROUTES.login || path === ROUTES.setup)) {
+    // Signed-in user revisiting login or the bootstrap-instructions
+    // page → bounce to dashboard. /bootstrap is meaningless to a
+    // logged-in user (admin already exists).
+    if (state.signedIn && (path === ROUTES.login || path === ROUTES.bootstrap)) {
       return ROUTES.dashboard;
     }
 
     // Signed-out user trying to reach a protected route → /login.
-    // /setup is allowed to render (it'll 410 itself if hit post-
-    // setup — see SetupWizard's submit handler — but rendering is
-    // harmless and consistent with the "auth routes are public" rule).
+    // /bootstrap stays accessible even post-bootstrap so a curious
+    // operator can read the docs page if they navigate to it manually
+    // (the page renders the same content regardless of firstRun).
     if (!state.signedIn && !isPublicAuthRoute) {
       return ROUTES.login;
     }

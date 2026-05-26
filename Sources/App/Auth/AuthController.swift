@@ -60,39 +60,20 @@ struct AuthController {
 
     /// Registers all auth routes under `/api/v1/auth/*`.
     /// M1.10's routes.swift calls this with the `/api/v1/auth` group.
+    ///
+    /// **M3.25**: `POST /setup` is GONE. Admin creation moved
+    /// out-of-band to the `keywordista createsuperuser` CLI subcommand
+    /// (raw-docker path) and the M3.17 `AdminBootstrap` env-var path
+    /// (cockpit path). Removing the HTTP endpoint closes the
+    /// takeover-during-boot attack surface that M3.21's SETUP_TOKEN
+    /// was defending — defense in depth is no longer needed because
+    /// the depth itself is structural.
     func register(on routes: any RoutesBuilder) {
-        routes.post("setup", use: setup)
         routes.post("login", use: login)
         routes.post("logout", use: logout)
         routes.post("accept-invite", use: acceptInvite)
         routes.get("invite", ":token", use: validateInvite)
         routes.get("state", use: state)
-    }
-
-    // MARK: - POST /setup
-
-    /// First-run admin creation. Returns 410 Gone the moment any
-    /// user exists in the DB — the only way to reset is by deleting
-    /// every user (manual DB surgery). This is the correct security
-    /// posture: a public `/setup` endpoint on a running deployment
-    /// would be a takeover vector.
-    func setup(req: Request) async throws -> Response {
-        if try await User.query(on: req.db).count() > 0 {
-            throw Abort(.gone, reason: "setup already complete; use /auth/login")
-        }
-
-        let input = try req.content.decode(CredentialsRequest.self)
-        let email = try AuthInputs.validateEmail(input.email)
-        try AuthInputs.validatePassword(input.password)
-
-        let user = User(
-            email: email,
-            passwordHash: try await hasher.hash(input.password),
-            role: .admin
-        )
-        try await user.save(on: req.db)
-
-        return try await issueSessionResponse(for: user, req: req, status: .created)
     }
 
     // MARK: - POST /login
@@ -369,6 +350,12 @@ struct AuthSuccessResponse: Content {
 struct AuthStateResponse: Content {
     /// "local" or "server". The SPA hides every auth UI in local mode.
     let mode: String
+    /// M3.25 — `firstRun` is true when the `users` table is empty.
+    /// The SPA renders `BootstrapInstructions` (with the docker exec
+    /// recipe) instead of the login page when this is true. Distinct
+    /// from M3.21's removed `setupTokenRequired`: now there's no
+    /// HTTP path to bootstrap, so the SPA's job is to TELL the
+    /// operator what to do, not to walk them through it.
     let firstRun: Bool
     let signedIn: Bool
     let user: UserResponse?

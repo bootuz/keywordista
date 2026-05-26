@@ -360,6 +360,47 @@ final class RenderProviderTests: XCTestCase {
         XCTAssertTrue(stub.calls[1].url!.path.hasSuffix("/postgres/dpg-y"))
     }
 
+    // ── M3.22: publicURLPattern ──────────────────────────────────────
+
+    func testPublicURLPatternProducesOnrenderSubdomain() {
+        // The whole point of the M3.22 extraction: each provider owns
+        // its own subdomain pattern. Render is `{name}.onrender.com`.
+        let provider = RenderProvider()
+        let url = provider.publicURLPattern(serviceName: "keywordista-studio")
+        XCTAssertEqual(url?.absoluteString, "https://keywordista-studio.onrender.com")
+    }
+
+    func testPublicURLPatternUsesHTTPS() {
+        // Render always issues TLS — never accidentally fall back to http.
+        let provider = RenderProvider()
+        let url = provider.publicURLPattern(serviceName: "test")
+        XCTAssertEqual(url?.scheme, "https")
+    }
+
+    func testPublicURLPatternHostIsServiceNameDotOnrender() {
+        // Pin the structure of the URL — not just the literal string —
+        // so a refactor that swaps URLComponents in still passes.
+        let provider = RenderProvider()
+        let url = provider.publicURLPattern(serviceName: "kw-prod")
+        XCTAssertEqual(url?.host, "kw-prod.onrender.com")
+        XCTAssertEqual(url?.path, "")
+        XCTAssertNil(url?.port)
+    }
+
+    func testPublicURLPatternIsPureFunction() {
+        // No network — calling it 100 times in a tight loop should
+        // be ~free, since ConfigureView invokes it on every keystroke
+        // for the live subdomain preview (planned UI).
+        let provider = RenderProvider()
+        let start = Date()
+        for i in 0..<1000 {
+            _ = provider.publicURLPattern(serviceName: "test-\(i)")
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertLessThan(elapsed, 0.1,
+                         "1000 URL constructions should take well under 100ms")
+    }
+
     func testDestroyTreats404AsSuccess() async throws {
         // Already-deleted service should not throw — matches the
         // Provider.destroy idempotency contract.

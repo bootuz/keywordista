@@ -124,6 +124,19 @@ final class DeployFlowCoordinator: ObservableObject {
     /// button (auth errors → no; network blips → yes).
     @Published var failure: FailureContext?
 
+    /// M3.24a injection seam: lets DeployFlowCoordinatorTests exercise
+    /// the `.timedOut` and `.cancelled` branches of `transitionToSuccess`
+    /// without standing up a fake URLSession + HTTP stack just to drive
+    /// a single boolean outcome. Production callers leave this default;
+    /// tests assign a closure that returns the outcome they're testing.
+    ///
+    /// Kept `internal` (not `private`) because the test target uses
+    /// `@testable import Keywordista`. Not exposed in any public API.
+    typealias ReadinessProbeFn = @MainActor (URL, @escaping @MainActor (String) -> Void) async -> ReadinessProbe.Outcome
+    var readinessProbe: ReadinessProbeFn = { url, sink in
+        await ReadinessProbe.waitForReady(baseURL: url, statusSink: sink)
+    }
+
     // MARK: - Init
 
     init(
@@ -258,11 +271,13 @@ final class DeployFlowCoordinator: ObservableObject {
         }
         let encryptionKey = SecretsGenerator.generateEncryptionKey()
 
-        // Public URL: predicted from the service name. Render gives
-        // every web service a URL of the form
-        // https://<name>.onrender.com — predictable when no naming
-        // collision (Render returns 409 at create time on collision).
-        let publicURL = predictedPublicURL(serviceName: serviceName, provider: provider)
+        // M3.22: public URL prediction now lives on the Provider
+        // protocol — each provider owns its own subdomain shape.
+        // Render returns `{name}.onrender.com`. Falls back to a
+        // synthetic example.com URL if the provider returns nil
+        // (CustomDockerHost, where the URL isn't derived from name).
+        let publicURL = provider.publicURLPattern(serviceName: serviceName)
+            ?? URL(string: "https://\(serviceName).example.com")!
 
         // Resolve the concrete DatabaseChoice from the picker state.
         // For external PG we plug in the user-supplied URL here.
@@ -282,7 +297,16 @@ final class DeployFlowCoordinator: ObservableObject {
         var envVars: [String: String] = [
             "KEYWORDISTA_MODE": "server",
             "KEYWORDISTA_ENCRYPTION_KEY": encryptionKey,
-            "KEYWORDISTA_PUBLIC_BASE_URL": publicURL,
+            // M3.22: URL → absoluteString. publicURLPattern returns
+            // URL? (typed) instead of the old String-shape helper.
+            // Strip trailing slashes only (not all "/") to avoid
+            // PUBLIC_BASE_URL compounding into "//api/v1/..." in
+            // some clients that naively concatenate.
+            "KEYWORDISTA_PUBLIC_BASE_URL": {
+                var s = publicURL.absoluteString
+                while s.hasSuffix("/") { s.removeLast() }
+                return s
+            }(),
             "KEYWORDISTA_ADMIN_EMAIL": adminEmail,
             "KEYWORDISTA_ADMIN_PASSWORD_HASH": adminPasswordHash,
         ]
@@ -397,16 +421,75 @@ final class DeployFlowCoordinator: ObservableObject {
     /// Step 5 → Step 6 (.success). Called after the deploy stream
     /// yields .healthCheckPassed. Builds the RemoteInstance + the
     /// SuccessContext.
-    private func transitionToSuccess() {
+    ///
+    /// M3.20: now `async` because we run `ReadinessProbe` between the
+    /// provider's health check passing and the success screen showing.
+    /// See ReadinessProbe.swift for the rationale — short version is
+    /// /health=200 isn't proof the auth stack is mounted yet, and the
+    /// user lands on a broken login page if we transition too eagerly.
+    private func transitionToSuccess() async {
         guard let provider = selectedProvider,
               let service = deployingService,
               let confirmation else { return }
 
+        // M3.22: prefer the URL the provider returned at create time
+        // (Render populates service.metadata["url"] once provisioning
+        // finishes); fall back to the provider's URL pattern when the
+        // metadata field is missing (most providers, most of the time
+        // — the URL takes a few seconds to appear post-create).
         let url = URL(string: service.metadata["url"] ?? "")
-            ?? URL(string: predictedPublicURL(
-                serviceName: confirmation.spec.serviceName,
-                provider: provider
-            ))!
+            ?? provider.publicURLPattern(serviceName: confirmation.spec.serviceName)
+            ?? URL(string: "https://\(confirmation.spec.serviceName).example.com")!
+
+        // M3.20: wait for /api/v1/auth/state to answer too, not just
+        // /health. The status sink writes into currentDeployStatus so
+        // the user sees readable progress instead of a frozen screen.
+        // M3.24a: invoked via `readinessProbe` closure to allow tests
+        // to inject .timedOut / .cancelled outcomes without standing
+        // up a fake URLSession.
+        currentDeployStatus = "Health check passed — verifying server is fully ready…"
+        let outcome = await readinessProbe(url) { [weak self] status in
+            self?.currentDeployStatus = status
+        }
+        switch outcome {
+        case .ready:
+            break  // fall through to build the RemoteInstance below
+        case .timedOut:
+            failure = FailureContext(
+                reason: """
+                    The server passed /health but never answered \
+                    /api/v1/auth/state within \(Int(ReadinessProbe.timeout))s.
+
+                    This usually means a database migration is hung or \
+                    auth routes failed to mount post-boot. Check the \
+                    provider's deploy logs (Render → Logs tab) for a \
+                    Swift backtrace or DB error.
+                    """,
+                retryable: true
+            )
+            phase = .failed
+            return
+        case .cancelled:
+            // M3.24a: cancellation mid-probe. Previously we returned
+            // silently here, but the for-await loop in
+            // startConsumingDeployEvents *also* returns after this,
+            // leaving phase pinned to .deploying forever — a frozen
+            // UI with no recovery path. cancel() does destroy the
+            // provider service, but the user never sees a state
+            // change confirming it.
+            //
+            // Symmetric with .timedOut: surface the cancellation via
+            // FailureContext so DeployingView can render a clear
+            // "Deploy cancelled" message + leave the deploying state.
+            // retryable=false because the operator's intent was to
+            // stop, not to retry against the same partial state.
+            failure = FailureContext(
+                reason: "Deploy cancelled during the post-health readiness check.",
+                retryable: false
+            )
+            phase = .failed
+            return
+        }
 
         let remote = RemoteInstance(
             displayName: confirmation.spec.serviceName,
@@ -506,20 +589,13 @@ final class DeployFlowCoordinator: ObservableObject {
         }
     }
 
-    /// Predicts the public URL Render assigns to a service from its
-    /// name. Pattern: `https://<name>.onrender.com`. Render returns
-    /// 409 on naming collision before deploy, so this prediction is
-    /// safe at proceed-to-confirm time.
-    private func predictedPublicURL(serviceName: String, provider: any Provider) -> String {
-        // For v1 we hardcode Render's URL shape; M4's FlyProvider
-        // gets its own shape (.fly.dev with possible suffix). Future
-        // refactor: move this into Provider as `publicURLPattern(name:)`.
-        switch provider.kind {
-        case .render: return "https://\(serviceName).onrender.com"
-        case .fly: return "https://\(serviceName).fly.dev"
-        default: return "https://\(serviceName).example.com"
-        }
-    }
+    // M3.22: predictedPublicURL was extracted onto the Provider
+    // protocol as `publicURLPattern(serviceName:) -> URL?`. Each
+    // provider now owns its own subdomain shape; the coordinator
+    // just asks. New providers (M4 Fly, M5 Railway/DO/Custom) don't
+    // need to touch coordinator code anymore — they implement
+    // publicURLPattern in their own file and the cockpit picks it
+    // up automatically. See RenderProvider for the canonical impl.
 
     private func startConsumingDeployEvents(
         service: ProviderService,
@@ -535,7 +611,14 @@ final class DeployFlowCoordinator: ObservableObject {
                 case .statusChanged(let status):
                     self.currentDeployStatus = status
                 case .healthCheckPassed:
-                    self.transitionToSuccess()
+                    // M3.20: /health passing isn't sufficient. Vapor
+                    // registers /health before mounting auth routes, so
+                    // there's a 1–5s window where /health=200 but
+                    // /api/v1/auth/state=503. Wait for the auth route
+                    // to answer too before declaring success — otherwise
+                    // the user clicks "Open dashboard" and lands on a
+                    // broken login page.
+                    await self.transitionToSuccess()
                     return
                 case .failed(let reason):
                     // Fix A: enrich the raw reason with provider-side

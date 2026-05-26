@@ -21,6 +21,7 @@ The image is **the same** for every path. What changes is the wrapping.
 ## TL;DR
 
 ```bash
+# 1. Start the container
 docker run -d \
   --name keywordista \
   -p 8080:8080 \
@@ -28,9 +29,19 @@ docker run -d \
   -e KEYWORDISTA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
   -e KEYWORDISTA_PUBLIC_BASE_URL=https://keywordista.example.com \
   ghcr.io/bootuz/keywordista:latest
+
+# 2. Create the admin user
+docker exec -it keywordista keywordista createsuperuser
+# (prompts for email + password)
+
+# 3. Visit your URL → log in → done
 ```
 
-Then visit your URL → setup wizard creates the admin user → you're done.
+The `createsuperuser` step is the Django-style admin-bootstrap
+command. It runs out-of-band so admin creation never touches the
+public HTTP surface — no scanner-race window, no setup endpoint to
+gate. Same command also works for adding additional admins later
+(e.g. after a lost-password recovery).
 
 ---
 
@@ -57,7 +68,11 @@ Everything else has sensible defaults — see
 
 ## What's optional but recommended
 
-Pre-bake the admin user to skip the in-browser setup wizard:
+### Pre-bake the admin user (skip the manual createsuperuser step)
+
+If you'd rather not run a separate `docker exec` step, you can
+bake the admin into the deploy spec via two env vars. The server's
+boot-time `AdminBootstrap` (M3.17) consumes them on first boot:
 
 ```bash
 # Hash a password locally — never put plaintext in env vars.
@@ -73,8 +88,25 @@ docker run -d \
   ghcr.io/bootuz/keywordista:latest
 ```
 
-Now the very first request to `/` lands on the login page, not the
-setup wizard.
+The container boots, sees both env vars, seeds the admin into the
+empty `users` table, and the very first request to `/` lands on
+the login page. This is exactly the mechanism the Keywordista
+macOS cockpit uses behind the scenes — your raw-docker setup
+matches the cockpit's deploy spec byte-for-byte.
+
+### Adding more admins later
+
+Same `createsuperuser` command works for additional admins after
+the first one exists — useful for lost-password recovery or
+provisioning a backup admin:
+
+```bash
+docker exec -it keywordista keywordista createsuperuser
+```
+
+For team-member additions (non-admin), use the **Settings → Users**
+invite flow inside the dashboard instead — recipients get a
+single-use link and don't need shell access to your container.
 
 ---
 

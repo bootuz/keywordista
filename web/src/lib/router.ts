@@ -9,15 +9,15 @@
 //      view get the same URL shapes (`https://kw.example.com/#/login`)
 //      regardless of how they're served.
 //
-// The auth-aware routing (kick to /login on 401, redirect to /setup
-// when firstRun is true, etc.) is NOT here — that lives in
-// lib/stores/auth.ts (M2.3) + App.svelte (M2.10). This file is just
-// the static map of paths → components.
+// The auth-aware routing (kick to /login on 401, redirect to
+// /bootstrap when firstRun is true, etc.) is NOT here — that lives
+// in lib/stores/auth.ts (M2.3) + App.svelte (M2.10). This file is
+// just the static map of paths → components.
 
 import type { RouteDefinition } from 'svelte-spa-router';
 import Dashboard from '../components/Dashboard.svelte';
 import LoginPage from '../components/LoginPage.svelte';
-import SetupWizard from '../components/SetupWizard.svelte';
+import BootstrapInstructions from '../components/BootstrapInstructions.svelte';
 import InviteAcceptPage from '../components/InviteAcceptPage.svelte';
 import UsersAdmin from '../components/UsersAdmin.svelte';
 import NotFoundPage from '../components/NotFoundPage.svelte';
@@ -33,7 +33,10 @@ import NotFoundPage from '../components/NotFoundPage.svelte';
 export const routes: RouteDefinition = {
   '/': Dashboard,
   '/login': LoginPage,
-  '/setup': SetupWizard,
+  // M3.25 — /setup (SetupWizard) replaced by /bootstrap
+  // (BootstrapInstructions, an empty-state docs page) because
+  // admin creation moved to the createsuperuser CLI.
+  '/bootstrap': BootstrapInstructions,
   '/invite/:token': InviteAcceptPage,
   '/settings/users': UsersAdmin,
   // Wildcard last — anything unmatched lands on the 404 page.
@@ -46,7 +49,7 @@ export const routes: RouteDefinition = {
 export const ROUTES = {
   dashboard: '/',
   login: '/login',
-  setup: '/setup',
+  bootstrap: '/bootstrap',
   invite: (token: string) => `/invite/${token}`,
   usersAdmin: '/settings/users',
 } as const;

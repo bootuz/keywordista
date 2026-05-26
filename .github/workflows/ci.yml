@@ -86,7 +86,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Node 24 — current LTS. Bumped from 20 (M3.23) ahead of
+          # GitHub Actions' Node 20 deprecation deadline (June 2026)
+          # and because 20 hit EOL April 2026. Vite 6 + Svelte 5 +
+          # svelte-check all run clean on 24.
+          node-version: '24'
           # npm ci reads the lockfile — caching the npm store makes the
           # 100-ish-package install instant on cache hits.
           cache: npm

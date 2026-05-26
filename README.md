@@ -25,7 +25,7 @@ Click **Open Dashboard** → the browser opens `http://127.0.0.1:8080/` (auto-pi
 
 ### Build from source
 
-If you want to hack on it, you'll also need Swift 5.10+ and Node 18+.
+If you want to hack on it, you'll also need Swift 5.10+ and Node 20+ (CI builds on Node 24).
 
 ```bash
 git clone https://github.com/bootuz/keywordista.git
@@ -53,7 +53,7 @@ docker run -d \
   ghcr.io/bootuz/keywordista:latest
 ```
 
-Visit your URL → setup wizard creates the admin user → invite teammates from inside the dashboard. The image is signed with cosign + carries SLSA-3 provenance; verification commands and the full env-var contract are documented below.
+Bootstrap your admin with `docker exec -it keywordista keywordista createsuperuser`, then log in and invite teammates from inside the dashboard. The image is signed with cosign + carries SLSA-3 provenance; verification commands and the full env-var contract are documented below.
 
 Reference deploy manifests live in [`deploy/`](deploy/):
 

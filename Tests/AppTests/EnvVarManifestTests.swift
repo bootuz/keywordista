@@ -144,6 +144,9 @@ struct EnvVarManifestTests {
 
         @Test("EnvVars.all contains 23 unique entries (the v1.0 contract size)")
         func allHasExpectedShape() {
+            // 24 → 23 after M3.25 removed KEYWORDISTA_SETUP_TOKEN
+            // (M3.21 introduced it; M3.25 removed alongside the
+            // /api/v1/auth/setup endpoint).
             #expect(EnvVars.all.count == 23, "if you added or removed an EnvVar, update this assertion AND docs/env-vars.md")
             let names = EnvVars.all.map(\.name)
             let unique = Set(names)
@@ -166,6 +169,7 @@ struct EnvVarManifestTests {
                 "DATABASE_URL",                         // contains password
                 "KEYWORDISTA_ENCRYPTION_KEY",
                 "KEYWORDISTA_ADMIN_PASSWORD_HASH",
+                // M3.25: KEYWORDISTA_SETUP_TOKEN removed.
             ], "If you added a credential-type var, mark valueIsSecret AND update this assertion.")
         }
     }
@@ -261,13 +265,57 @@ struct EnvVarManifestTests {
                 _ = try Manifest.bootstrap(env: env)
                 Issue.record("expected throw")
             } catch let err as EnvVarError {
-                guard case .parseFailed(let name, _, _) = err else {
+                guard case .parseFailed(let name, _, _, let isSecret) = err else {
                     Issue.record("expected .parseFailed, got \(err)"); return
                 }
                 #expect(name == "KEYWORDISTA_ENCRYPTION_KEY")
+                #expect(isSecret == true,
+                       "encryption key carries valueIsSecret=true; M3.24c expects it to propagate to the error")
             } catch {
                 Issue.record("expected EnvVarError, got \(error)")
             }
+        }
+
+        // ── M3.24c: redaction of secret raw values in error logs ──
+
+        @Test("parseFailed.description redacts the raw value when valueIsSecret is true")
+        func parseFailedRedactsSecretRawValues() {
+            // M3.25: sample-name updated to a still-extant secret var
+            // (encryption key) since SETUP_TOKEN is gone. The
+            // redaction logic itself is var-agnostic — it only reads
+            // `valueIsSecret` from the case payload.
+            let secretErr = EnvVarError.parseFailed(
+                name: "KEYWORDISTA_ENCRYPTION_KEY",
+                raw: "this-is-a-secret-value-that-should-not-leak-to-logs",
+                reason: "must be 64 hex characters",
+                valueIsSecret: true
+            )
+            let desc = secretErr.description
+            // The secret content must NOT appear verbatim.
+            #expect(!desc.contains("this-is-a-secret-value"),
+                   "redacted description must NOT contain the raw secret, got: \(desc)")
+            // The redaction marker + character count must be present
+            // so the operator can still tell roughly what went wrong.
+            #expect(desc.contains("<redacted, 51 chars>"))
+            // The reason must survive — it's the actionable bit.
+            #expect(desc.contains("must be 64 hex characters"))
+            // The var name must survive — operator needs to know
+            // which env var failed.
+            #expect(desc.contains("KEYWORDISTA_ENCRYPTION_KEY"))
+        }
+
+        @Test("parseFailed.description shows raw value when valueIsSecret is false")
+        func parseFailedShowsNonSecretRawValues() {
+            // For non-secret vars (e.g., PORT, HOSTNAME), the raw
+            // value is genuinely useful diagnostic info — keep it.
+            let publicErr = EnvVarError.parseFailed(
+                name: "PORT",
+                raw: "not-a-number",
+                reason: "must be a positive integer",
+                valueIsSecret: false
+            )
+            #expect(publicErr.description.contains("not-a-number"))
+            #expect(!publicErr.description.contains("redacted"))
         }
     }
 
@@ -365,6 +413,7 @@ struct EnvVarManifestTests {
             let m = Manifest(mode: .server)
             let entries = m.versionEnv(env: .fixture([:]))
             let secret = Set(entries.filter(\.valueIsSecret).map(\.name))
+            // M3.25: dropped from 4 → 3 after SETUP_TOKEN removal.
             #expect(secret == [
                 "DATABASE_URL",
                 "KEYWORDISTA_ENCRYPTION_KEY",

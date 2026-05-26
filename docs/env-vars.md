@@ -189,6 +189,12 @@ as env vars** — the cockpit hashes locally on the Mac before sending
 the hash to the provider. Generate with `htpasswd -nB -C 12 yourname |
 cut -d: -f2`.
 
+> **Removed in M3.25**: `KEYWORDISTA_SETUP_TOKEN` (M3.21 defense-in-
+> depth for the HTTP `/setup` endpoint) was deleted alongside the
+> endpoint itself. Admin creation now happens out-of-band via the
+> `keywordista createsuperuser` CLI subcommand. No HTTP attack
+> surface means no token needed to gate it.
+
 ---
 
 ## Sign-up and auth policy

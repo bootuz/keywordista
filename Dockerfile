@@ -34,7 +34,14 @@
 
 # ── Stage 1: Svelte SPA ──────────────────────────────────────────────
 
-FROM node:20-alpine AS spa-builder
+# M3.24e: bumped from node:20 → node:24 in lockstep with M3.23's
+# GHA workflow bump. Without this, the production image's SPA was
+# still being built with Node 20 even though every other build path
+# (CI, release-app, release-service) had moved to 24. node:24-alpine
+# is the LTS-line equivalent of node:20-alpine — same base layer,
+# same minimal footprint, same package manager. Vite 6 + Svelte 5 +
+# svelte-check all run clean on 24.
+FROM node:24-alpine AS spa-builder
 WORKDIR /spa
 
 # Package files first → npm-cache layer reuses across source changes.

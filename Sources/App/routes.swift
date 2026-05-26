@@ -53,6 +53,9 @@ func routes(_ app: Application, manifest: Manifest) throws {
         sessionTTLDays: try manifest.require(EnvVars.sessionTTLDays),
         inviteTTLDays: try manifest.require(EnvVars.inviteTTLDays),
         mode: manifest.mode
+        // M3.25: M3.21's setupToken arg removed alongside the /setup
+        // endpoint deletion. Admin creation moved to the
+        // `keywordista createsuperuser` CLI subcommand.
     )
     authController.register(on: api.grouped("auth"))
 

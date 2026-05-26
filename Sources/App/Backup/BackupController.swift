@@ -107,12 +107,9 @@ enum Backup {
         // could appear in macOS user names ("/Users/Mary O'Brien/...")
         // by wrapping in double single-quotes per SQLite's rules.
         let escaped = tempPath.replacingOccurrences(of: "'", with: "''")
-        try await sql.raw(SQLQueryString("VACUUM INTO '\(raw: escaped)'")).run()
+        try await sql.raw(SQLQueryString("VACUUM INTO '\(unsafeRaw: escaped)'")).run()
 
         defer {
-            // Best-effort cleanup. If this throws (permissions, etc.)
-            // we don't care — we already have the bytes; the temp
-            // file will get reaped at system level eventually.
             try? FileManager.default.removeItem(atPath: tempPath)
         }
 

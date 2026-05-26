@@ -7,19 +7,25 @@ import Vapor
 /// AND the `users` table is empty, creates the first admin user from
 /// those env vars BEFORE the HTTP server starts accepting traffic.
 ///
-/// **Why this matters (the security hole this closes)**: cockpit-
-/// deployed instances send the admin credentials as env vars, expecting
-/// the backend to seed them at boot. Without this code, the env vars
-/// are read by the manifest but never consumed — the users table stays
-/// empty, and `POST /api/v1/auth/setup` is wide open for anyone who
-/// discovers the URL. On Render's predictable `*.onrender.com`
-/// subdomain space, a casual subdomain scan would find newly-deployed
-/// instances and the first hit would claim admin.
+/// **Why this exists**: cockpit-deployed instances send the admin
+/// credentials as env vars, expecting the backend to seed them at
+/// boot — no shell access required, no manual CLI step in the deploy
+/// flow. This code reads those env vars and inserts the User row
+/// before HTTP traffic starts.
 ///
-/// **Lifecycle commitment**: this MUST run synchronously to completion
-/// BEFORE `routes()` is called in configure.swift. Otherwise there's
-/// a race window where Render's load balancer detects /health=200
-/// and starts routing setup requests before the admin is seeded.
+/// **Pre-M3.25 security framing**: this also closed a takeover hole
+/// against the `POST /api/v1/auth/setup` endpoint, which would
+/// otherwise have been wide open for scanners during the boot
+/// window. M3.25 removed that endpoint entirely (admin creation
+/// moved to the `keywordista createsuperuser` CLI), so the framing
+/// today is just "cockpit's seamless-deploy mechanism" — the
+/// takeover surface is gone at the architectural level.
+///
+/// **Lifecycle commitment**: this still runs synchronously to
+/// completion BEFORE `routes()` is called in configure.swift, for
+/// reasons of clarity (operators reading the logs see seeding
+/// happen before HTTP starts) even though the security urgency is
+/// now lower.
 ///
 /// **What it does NOT do**:
 ///   • Update an existing admin (we only seed when users table is
@@ -37,9 +43,9 @@ enum AdminBootstrap {
         case seeded(email: String)
         /// Users already exist → no-op (subsequent boots skip).
         case alreadyHasUsers
-        /// Env vars not set → defer to the in-browser setup wizard.
-        /// (Local mode hits this; raw-docker-run users intentionally
-        /// hit this and use the wizard.)
+        /// Env vars not set → defer to the `keywordista createsuperuser`
+        /// CLI subcommand for admin bootstrap (raw-docker path). Local
+        /// mode hits this unconditionally (no auth there).
         case envVarsNotProvided
     }
 
@@ -74,17 +80,17 @@ enum AdminBootstrap {
         }
 
         // Both env vars must be present. If only one is, that's
-        // probably a misconfiguration the operator should know
-        // about, but we don't fail boot — we just log + defer to
-        // the wizard.
+        // probably a misconfiguration the operator should know about,
+        // but we don't fail boot — we just log + defer to the
+        // createsuperuser CLI (M3.25).
         guard let email = try manifest.optional(EnvVars.adminEmail, env: env) else {
             if (try? manifest.optional(EnvVars.adminPasswordHash, env: env)) != nil {
                 logger.warning("""
                     KEYWORDISTA_ADMIN_PASSWORD_HASH is set but \
                     KEYWORDISTA_ADMIN_EMAIL is missing — admin will NOT \
-                    be auto-created. Anyone discovering the deployment \
-                    URL can claim admin via the setup wizard. Set both \
-                    env vars OR rotate the deployment.
+                    be auto-created. Set both env vars and restart, OR \
+                    bootstrap one manually with \
+                    `docker exec -it <container> keywordista createsuperuser`.
                     """)
             }
             return .envVarsNotProvided
@@ -93,9 +99,9 @@ enum AdminBootstrap {
             logger.warning("""
                 KEYWORDISTA_ADMIN_EMAIL is set but \
                 KEYWORDISTA_ADMIN_PASSWORD_HASH is missing — admin will \
-                NOT be auto-created. /api/v1/auth/setup is reachable by \
-                anyone with the deployment URL. Set both env vars OR \
-                rotate the deployment.
+                NOT be auto-created. Set both env vars and restart, OR \
+                bootstrap one manually with \
+                `docker exec -it <container> keywordista createsuperuser`.
                 """)
             return .envVarsNotProvided
         }
@@ -115,7 +121,7 @@ enum AdminBootstrap {
         logger.notice("""
             seeded admin user '\(normalizedEmail)' from env vars at boot \
             (KEYWORDISTA_ADMIN_EMAIL + KEYWORDISTA_ADMIN_PASSWORD_HASH). \
-            /api/v1/auth/setup will now return 410 Gone for all callers.
+            Ready to log in.
             """)
 
         return .seeded(email: normalizedEmail)

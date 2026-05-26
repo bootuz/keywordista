@@ -100,6 +100,32 @@ protocol Provider: Sendable {
     /// specific remediation copy otherwise.
     func validateServiceName(_ name: String) -> ServiceNameValidation
 
+    /// M3.22: predicted public URL for a service with this name,
+    /// BEFORE the provider has confirmed it. Used in two places:
+    ///
+    ///   1. **Configure step preview** — shows the user the URL
+    ///      their service will land at while they're typing, so
+    ///      they can see whether `studio-prod` or `studio-prod-2`
+    ///      lands at the URL they want.
+    ///
+    ///   2. **transitionToSuccess fallback** — when the provider's
+    ///      create-service response doesn't include the resolved
+    ///      URL (Render's create returns a service id, the URL
+    ///      lands a few seconds later), the cockpit falls back to
+    ///      this prediction so the success screen can still link.
+    ///
+    /// **Pure function, synchronous, no network.** Each provider
+    /// has a stable subdomain pattern: Render `{name}.onrender.com`,
+    /// Fly `{name}.fly.dev`, Railway `{name}.up.railway.app`. The
+    /// caller's job is to pass a name that's *already passed*
+    /// `validateServiceName`; this function trusts the input and
+    /// builds the URL mechanically.
+    ///
+    /// Returns `nil` for providers where prediction is meaningless
+    /// (CustomDockerHostProvider — the user supplies the URL post-
+    /// deploy because their hosting URL isn't derived from a name).
+    func publicURLPattern(serviceName: String) -> URL?
+
     // ── Step 5: Deploy ───────────────────────────────────────────
 
     /// Creates the service per the spec. Sequenced per database
