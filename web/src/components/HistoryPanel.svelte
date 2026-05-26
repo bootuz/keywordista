@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getHistory, getKeywordSuggestions, addKeyword, ApiError } from '../lib/api';
-  import type { HistoryPoint, SuggestionRow } from '../lib/types';
+  import type { AnonymizedSummary, HistoryPoint, SuggestionRow } from '../lib/types';
   import CountryFlag from './CountryFlag.svelte';
 
   interface Props {
@@ -46,6 +46,7 @@
     // Reset the suggestions tab so a stale list from the previous keyword
     // can't flash before the new fetch completes.
     suggestions = null;
+    anonymized = null;
     suggestionsError = null;
     suggestionsLoading = false;
     addedTerms.clear();
@@ -69,6 +70,10 @@
   // Lazy: only fetched on first activation of the Related tab. Cached for
   // the panel's lifetime so re-tabbing doesn't refetch.
   let suggestions = $state<SuggestionRow[] | null>(null);
+  // Apple's LOW_VOLUME aggregated totals — see AnonymizedSummary in types.ts.
+  // Null until the first successful fetch; null after a fetch that returned
+  // no anonymized rows (campaign produced only above-threshold queries).
+  let anonymized = $state<AnonymizedSummary | null>(null);
   let suggestionsLoading = $state(false);
   let suggestionsError = $state<string | null>(null);
   let showTracked = $state(false);
@@ -82,13 +87,43 @@
     try {
       const result = await getKeywordSuggestions(keywordId);
       if (token !== fetchToken) return;
-      suggestions = result;
+      suggestions = result.rows;
+      anonymized = result.anonymized;
     } catch (err) {
       if (token !== fetchToken) return;
       suggestionsError = err instanceof Error ? err.message : String(err);
     } finally {
       if (token === fetchToken) suggestionsLoading = false;
     }
+  }
+
+  // Auto-load suggestions whenever the Related tab is active AND we
+  // don't yet have data for the current keyword. Fires in two important
+  // cases the original code missed:
+  //   1. User opens panel on a keyword, switches to Related, switches to
+  //      a different keyword — the keyword-change effect resets
+  //      suggestions=null but doesn't refetch on its own.
+  //   2. Component re-renders with same Related tab but new props.
+  // The single guard inside loadSuggestions() makes this idempotent —
+  // selectTab() can still call it eagerly without risking a double fetch.
+  $effect(() => {
+    if (activeTab === 'related' && suggestions === null && !suggestionsLoading) {
+      void loadSuggestions();
+    }
+  });
+
+  // Force a re-fetch even when we already have data on screen. The
+  // current rows blank out (the conditional below falls through to the
+  // "Looking up…" branch because suggestions is null) so the user gets
+  // an unambiguous "refresh in flight" signal — matches the first-load
+  // UX byte-for-byte.
+  function refreshSuggestions(): void {
+    if (suggestionsLoading) return;
+    suggestions = null;
+    anonymized = null;
+    suggestionsError = null;
+    // No need to call loadSuggestions() here — the $effect above will
+    // observe (suggestions === null && !suggestionsLoading) and fire it.
   }
 
   function selectTab(tab: Tab): void {
@@ -259,6 +294,43 @@
       {/if}
     {:else}
       <!-- Related tab -->
+      <!--
+        Section header gives the refresh button a visual anchor — without
+        it, the button floats in dead space whenever the body below is an
+        empty state. The label also makes the tab content self-describing
+        for screen readers (h3 lands in the document outline). Refresh is
+        right-aligned on the same row; thin border underneath frames the
+        section so subsequent empty/loading copy doesn't crowd it.
+      -->
+      <div class="mb-3 flex items-baseline justify-between border-b border-zinc-200 dark:border-zinc-800 pb-2">
+        <h3 class="text-xs font-medium uppercase tracking-wide text-zinc-500">
+          Related search terms
+        </h3>
+        <button
+          type="button"
+          onclick={refreshSuggestions}
+          disabled={suggestionsLoading}
+          aria-label="Refresh related search terms"
+          title="Refresh"
+          class="-my-1 rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <!-- Heroicons arrow-path (Apache 2.0) -->
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="h-4 w-4 {suggestionsLoading ? 'animate-spin' : ''}"
+          >
+            <path d="M21 12a9 9 0 1 1-3.6-7.2" />
+            <path d="M21 4v5h-5" />
+          </svg>
+        </button>
+      </div>
+
       {#if suggestionsLoading}
         <p class="text-sm text-zinc-500">Looking up search terms from your Apple Search Ads campaign…</p>
       {:else if suggestionsError}
@@ -270,18 +342,71 @@
         >
           Retry
         </button>
-      {:else if !suggestions || suggestions.length === 0}
-        <div class="text-sm text-zinc-500">
-          <p>No related search terms yet.</p>
-          <p class="mt-2 text-xs">
-            Apple Search Ads only surfaces search terms after your discovery campaign has served impressions
-            for this storefront. If you just created the campaign, check back in a day or two.
-          </p>
-        </div>
+      {:else if !suggestions}
+        <p class="text-sm text-zinc-500">No related search terms yet.</p>
       {:else}
+        <!--
+          Banner first: Apple's LOW_VOLUME totals tell the user the
+          campaign IS producing signal even when no individual term passes
+          the privacy threshold. This is more important than the empty
+          state and renders even if the term list below is empty.
+        -->
+        {#if anonymized}
+          <div
+            class="mb-4 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200"
+          >
+            <p>
+              Apple is anonymizing <span class="font-semibold tabular-nums">{anonymized.impressions}</span>
+              additional {anonymized.impressions === 1 ? 'impression' : 'impressions'}
+              {anonymized.taps > 0 ? ` and ${anonymized.taps} ${anonymized.taps === 1 ? 'tap' : 'taps'}` : ''}
+              across {anonymized.sourceCount} {anonymized.sourceCount === 1 ? 'ad group' : 'ad groups'} as low-volume queries.
+            </p>
+            <p class="mt-1 text-amber-800/80 dark:text-amber-300/80">
+              These are real campaign impressions — Apple just won't deanonymize the query text until volume
+              clears its privacy threshold. Check back in a few days.
+            </p>
+          </div>
+        {/if}
+
+        {#if suggestions.length === 0}
+          <div class="text-sm text-zinc-500">
+            <p>No deanonymized search terms yet.</p>
+            <p class="mt-2 text-xs">
+              {#if anonymized}
+                Your campaign is serving impressions, but every individual query is still under Apple's
+                privacy threshold. Wait for traffic to accumulate.
+              {:else}
+                Apple Search Ads only surfaces search terms after your discovery campaign has served
+                impressions for this storefront. If you just created the campaign, check back in a day or two.
+              {/if}
+            </p>
+          </div>
+        {:else if visibleSuggestions.length === 0}
+          <!--
+            "Hidden by filter" empty state: suggestions exist but the
+            already-tracked filter (default on) has hidden all of them.
+            Without this, the user sees headers + empty tbody + a tiny
+            grey link at the bottom — easy to miss and easy to mistake
+            for "no data".
+          -->
+          <div class="text-sm text-zinc-500">
+            <p>
+              {trackedCount === 1
+                ? 'The only related term is already tracked.'
+                : `All ${trackedCount} related terms are already tracked.`}
+            </p>
+            <button
+              type="button"
+              onclick={() => (showTracked = true)}
+              class="mt-2 text-xs text-amber-600 dark:text-amber-400 hover:underline"
+            >
+              {trackedCount === 1 ? 'Show it' : `Show ${trackedCount} tracked`}
+            </button>
+          </div>
+        {:else}
         <p class="mb-3 text-xs text-zinc-500">
           Queries from your Apple Search Ads campaigns in {countryCode.toUpperCase()} that mention
-          <span class="text-zinc-700 dark:text-zinc-300">{keywordTerm}</span>. Sorted by impressions.
+          <span class="text-zinc-700 dark:text-zinc-300">{keywordTerm}</span>. Sorted by relevance.
         </p>
 
         <table class="w-full text-sm">
@@ -342,6 +467,7 @@
           >
             {showTracked ? 'Hide' : 'Show'} {trackedCount} already tracked
           </button>
+        {/if}
         {/if}
       {/if}
     {/if}
