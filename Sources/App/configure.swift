@@ -123,4 +123,23 @@ public func configure(_ app: Application) async throws {
     try app.queues.startScheduledJobs()
 
     try routes(app, manifest: manifest)
+
+    // ── CLI commands ──────────────────────────────────────────────────
+    //
+    // M3.25: register the Django-style `createsuperuser` subcommand.
+    // Vapor's `app.execute()` dispatches on the first argv after the
+    // binary name — `keywordista serve` is the default, `keywordista
+    // createsuperuser` runs this command. Same configure() runs for
+    // both because `app.execute()` is invoked AFTER configure(app),
+    // so DB connections + migrations + the manifest are all ready by
+    // the time the command's run() body executes.
+    //
+    // Raw-docker operators invoke this via `docker exec <container>
+    // keywordista createsuperuser` after the container is up. See
+    // Sources/App/Commands/CreateSuperUserCommand.swift for the
+    // full rationale.
+    app.asyncCommands.use(
+        CreateSuperUserCommand(cost: try manifest.require(EnvVars.bcryptCost)),
+        as: "createsuperuser"
+    )
 }
