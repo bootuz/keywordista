@@ -20,10 +20,17 @@ struct RefreshService: RefreshServiceProtocol {
             logger.warning("RefreshService: keyword \(keywordID) not found")
             return
         }
-        // All watched apps are candidates — we no longer scope by country.
-        // The job ranks each app against the search results returned for the
-        // keyword's storefront; apps not in the top 200 simply get rank=nil.
-        let watchedApps = try await watchedAppRepository.all()
+        // All *own* watched apps are candidates — we no longer scope by
+        // country. The job ranks each app against the search results
+        // returned for the keyword's storefront; apps not in the top 200
+        // simply get rank=nil.
+        //
+        // Competitors are filtered out here: they're tracked for metadata
+        // snapshotting (`AppMetadataSnapshotService`), not for keyword
+        // rankings. Letting them through would silently pull iTunes
+        // traffic the user never asked for *and* litter `rank_checks`
+        // with rows the dashboard isn't designed to display.
+        let watchedApps = try await watchedAppRepository.all().filter { $0.typedKind == .own }
         let results = try await searchClient.search(
             term: keyword.term,
             country: keyword.countryCode,

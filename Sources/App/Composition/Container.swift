@@ -96,6 +96,16 @@ extension Request {
         )
     }
 
+    func appMetadataSnapshotService() -> any AppMetadataSnapshotServiceProtocol {
+        AppMetadataSnapshotService(
+            snapshots: FluentAppMetadataSnapshotRepository(db: db),
+            watchedApps: FluentWatchedAppRepository(db: db),
+            lookupClient: ITunesLookupClient(client: client),
+            scraper: AppStoreHTMLScraper(client: client, logger: logger),
+            logger: logger
+        )
+    }
+
     func versionService() -> any VersionServiceProtocol {
         VersionService(
             client: client,
@@ -145,6 +155,22 @@ extension Application {
             return KeywordService(
                 repository: FluentKeywordRepository(db: app.db),
                 dispatcher: QueueRefreshDispatcher(queue: context.queue)
+            )
+        }
+    }
+
+    /// Job-scope factory mirror of `Request.appMetadataSnapshotService()`.
+    /// The daily snapshot job runs from a `QueueContext` (no `Request`),
+    /// so it needs a separate entry point with the same wiring.
+    var appMetadataSnapshotServiceFactory: @Sendable (QueueContext) -> any AppMetadataSnapshotServiceProtocol {
+        { context in
+            let app = context.application
+            return AppMetadataSnapshotService(
+                snapshots: FluentAppMetadataSnapshotRepository(db: app.db),
+                watchedApps: FluentWatchedAppRepository(db: app.db),
+                lookupClient: ITunesLookupClient(client: app.client),
+                scraper: AppStoreHTMLScraper(client: app.client, logger: context.logger),
+                logger: context.logger
             )
         }
     }

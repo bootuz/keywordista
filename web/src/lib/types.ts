@@ -1,13 +1,114 @@
 // Mirrors Sources/App/Domain/DomainTypes.swift.
 // Keep in sync manually — small surface, low churn.
 
+/// The server-side enum is `own | competitor`. We accept any string
+/// over the wire so an older SPA against a newer server (or vice-versa)
+/// gracefully ignores unknown kinds rather than crashing — the diff UI
+/// treats unknown as `own`, matching the Swift accessor's coercion.
+export type WatchedAppKind = 'own' | 'competitor';
+
 export interface WatchedApp {
   id: string;
   appStoreId: number;
   bundleId: string;
   name: string;
   iconURL: string | null;
+  kind: WatchedAppKind;
   addedAt: string | null;
+}
+
+// ── Competitor analysis (v2) ────────────────────────────────────────
+//
+// Mirrors Sources/App/Models/AppMetadataSnapshot.swift's column shape
+// and Sources/App/Controllers/MetadataController.swift's response DTOs.
+// Most fields are nullable because Apple's iTunes lookup is permissive
+// (free apps omit `price`, apps without subtitles omit `subtitle`, etc.).
+// Array-shaped fields are stored server-side as JSON strings; the API
+// emits them as the raw JSON in the wire payload, so they arrive as the
+// string here and the SPA parses with `JSON.parse(...)` on demand.
+export interface AppMetadataSnapshot {
+  id: string;
+  watchedAppId: string;
+  countryCode: string;
+
+  trackName: string;
+  bundleId: string;
+  version: string | null;
+  currentVersionReleaseDate: string | null;
+  releaseNotes: string | null;
+
+  subtitle: string | null;
+  // `appDescription` over `description` because `description` is reserved
+  // on many DOM types and IDE autocomplete in Svelte components would
+  // otherwise nudge developers toward the wrong field.
+  appDescription: string | null;
+  promotionalText: string | null;        // always null in v1 (phase-2 AMP fetch)
+  sellerName: string | null;
+  primaryGenreName: string | null;
+  genresJSON: string | null;             // JSON-encoded string[]
+
+  artworkURL512: string | null;
+  screenshotURLsJSON: string | null;     // JSON-encoded string[] of Apple CDN URLs
+  ipadScreenshotURLsJSON: string | null;
+
+  price: number | null;
+  currency: string | null;
+  formattedPrice: string | null;
+  inAppPurchasesJSON: string | null;     // always null in v1 (phase-2 AMP fetch)
+
+  averageUserRating: number | null;
+  userRatingCount: number | null;
+  averageUserRatingForCurrentVersion: number | null;
+  userRatingCountForCurrentVersion: number | null;
+  contentAdvisoryRating: string | null;
+  languagesJSON: string | null;          // JSON-encoded string[]
+  fileSizeBytes: number | null;
+  minimumOSVersion: string | null;
+
+  scrapeFailedAt: string | null;
+  contentHash: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  fetchedAt: string;
+}
+
+/// One per-field change in the recentChanges timeline.
+export interface MetadataChange {
+  field: string;             // canonical column name, e.g. "subtitle", "version"
+  from: string | null;       // prior value (stringified for transport)
+  to: string | null;         // new value
+  at: string;                // ISO 8601 — the firstSeenAt of the new row
+}
+
+/// One app's slice of the /compare response.
+export interface CompareAppEntry {
+  id: string;
+  name: string;
+  kind: WatchedAppKind;
+  latest: AppMetadataSnapshot | null;    // null only on hard fetch failure
+  recentChanges: MetadataChange[];
+}
+
+/// Response shape of GET /api/v1/compare.
+export interface CompareResponse {
+  country: string;
+  fetchedAt: string;
+  ownApp: CompareAppEntry | null;        // null if `own` was unknown id
+  competitors: CompareAppEntry[];
+}
+
+/// Search hit returned by GET /api/v1/competitors/search.
+/// `alreadyTracked` lets the UI gray out the "Add" button for apps
+/// already in the watched_apps table; `existingKind` explains whether
+/// it's already an own app or already a competitor.
+export interface CompetitorSearchHit {
+  appStoreId: number;
+  name: string;
+  iconURL: string | null;
+  averageRating: number | null;
+  ratingCount: number | null;
+  alreadyTracked: boolean;
+  existingKind: WatchedAppKind | null;
 }
 
 export interface Keyword {

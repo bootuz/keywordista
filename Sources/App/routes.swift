@@ -69,6 +69,8 @@ func routes(_ app: Application, manifest: Manifest) throws {
         // that bind), so an extra cookie dance would only add
         // friction without adding security.
         try api.register(collection: AppsController())
+        try api.register(collection: CompetitorsController())
+        try api.register(collection: MetadataController())
         try api.register(collection: KeywordsController())
         try api.register(collection: DashboardController())
         try api.register(collection: SettingsController())
@@ -88,6 +90,8 @@ func routes(_ app: Application, manifest: Manifest) throws {
         // Any signed-in user can read+mutate the team's apps,
         // keywords, dashboard, charts.
         try authenticated.register(collection: AppsController())
+        try authenticated.register(collection: CompetitorsController())
+        try authenticated.register(collection: MetadataController())
         try authenticated.register(collection: KeywordsController())
         try authenticated.register(collection: DashboardController())
         try authenticated.register(collection: ChartsController())

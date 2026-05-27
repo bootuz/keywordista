@@ -79,7 +79,14 @@ struct ChartTrackerService: ChartTrackerServiceProtocol {
 
     @discardableResult
     func refreshAll(now: Date) async throws -> ChartRefreshSummary {
-        let apps = try await WatchedApp.query(on: db).all()
+        // Competitor apps participate in metadata snapshots only, not
+        // chart watching — they have no associated keywords, the user
+        // didn't ask for their chart position, and probing 175
+        // storefronts of chart data per competitor would balloon iTunes
+        // traffic. The typed accessor coerces NULL to `.own` (the
+        // migration backfills the rest), so pre-feature rows naturally
+        // pass through this filter.
+        let apps = try await WatchedApp.query(on: db).all().filter { $0.typedKind == .own }
         var totalCharts = 0
         var totalEvents = 0
 

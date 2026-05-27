@@ -12,6 +12,9 @@ import type {
   SuggestionsResponse,
   ChartPosition,
   ChartEvent,
+  AppMetadataSnapshot,
+  CompareResponse,
+  CompetitorSearchHit,
 } from './types';
 
 export const BASE = '/api/v1';
@@ -82,6 +85,73 @@ export const addApp = (appStoreId: number, lookupCountry?: string) =>
 
 export const deleteApp = (id: string) =>
   apiFetch<void>(`/apps/${id}`, { method: 'DELETE' });
+
+// Competitor analysis (v2) ----------------------------------------
+// Wrappers for /competitors/* and /apps/:id/metadata*. Kept alongside
+// the rest of the api surface (rather than a separate file) because
+// the wrapper functions are one-liners and the shared apiFetch + 401
+// handling stay intact.
+
+export const listCompetitors = () =>
+  apiFetch<WatchedApp[]>('/competitors');
+
+export const addCompetitor = (appStoreId: number, lookupCountry?: string) =>
+  apiFetch<WatchedApp>('/competitors', {
+    method: 'POST',
+    body: JSON.stringify({ appStoreId, lookupCountry: lookupCountry ?? 'us' }),
+  });
+
+export const deleteCompetitor = (id: string) =>
+  apiFetch<void>(`/competitors/${id}`, { method: 'DELETE' });
+
+export const searchCompetitors = (term: string, country = 'us', limit = 20) => {
+  const params = new URLSearchParams({
+    term,
+    country,
+    limit: String(limit),
+  });
+  return apiFetch<CompetitorSearchHit[]>(`/competitors/search?${params}`);
+};
+
+/// Phase-2 stub. Always returns `[]` from the server in v1. Kept here so
+/// the ComparePage's "Suggestions" surface can call a stable URL today.
+export const getCompetitorSuggestions = () =>
+  apiFetch<CompetitorSearchHit[]>('/competitors/suggestions');
+
+export const getAppMetadata = (id: string, country = 'us') =>
+  apiFetch<AppMetadataSnapshot>(
+    `/apps/${id}/metadata?country=${encodeURIComponent(country)}`,
+  );
+
+export const getAppMetadataHistory = (id: string, country = 'us', limit = 50) =>
+  apiFetch<AppMetadataSnapshot[]>(
+    `/apps/${id}/metadata/history?country=${encodeURIComponent(country)}&limit=${limit}`,
+  );
+
+/// Manual refresh — same code path as the daily job, just synchronous.
+/// Always works regardless of KEYWORDISTA_METADATA_SNAPSHOT_ENABLED.
+export const refreshAppMetadata = (id: string, country = 'us') =>
+  apiFetch<AppMetadataSnapshot>(
+    `/apps/${id}/metadata/refresh?country=${encodeURIComponent(country)}`,
+    { method: 'POST' },
+  );
+
+/// Aggregate /compare endpoint with server-side recentChanges + lazy
+/// backfill. `competitorIds` is comma-joined on the wire because the
+/// server accepts a single CSV query param (simpler routing than
+/// repeated `?competitors[]=` parsing).
+export const getCompare = (
+  ownId: string,
+  competitorIds: string[],
+  country = 'us',
+) => {
+  const params = new URLSearchParams({
+    own: ownId,
+    competitors: competitorIds.join(','),
+    country,
+  });
+  return apiFetch<CompareResponse>(`/compare?${params}`);
+};
 
 // Keywords ---------------------------------------------------------
 export const listKeywords = () => apiFetch<Keyword[]>('/keywords');

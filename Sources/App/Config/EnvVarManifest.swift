@@ -533,6 +533,14 @@ public enum EnvVars {
         parse: Parsers.positiveInt
     )
 
+    public static let metadataSnapshotEnabled = EnvVar<Bool>(
+        name: "KEYWORDISTA_METADATA_SNAPSHOT_ENABLED",
+        description: "Kill switch for the daily competitor-analysis metadata snapshot job. Set to false to skip the 03:30 UTC job entirely; manual /apps/:id/metadata/refresh and at-add snapshots still work. Off-switch use case: Docker users who only care about keyword tracking and want to skip the extra daily iTunes traffic.",
+        defaults: { _ in true },
+        defaultDescription: { _ in "true" },
+        parse: Parsers.bool
+    )
+
     public static let healthcheckPath = EnvVar<String>(
         name: "KEYWORDISTA_HEALTHCHECK_PATH",
         description: "For providers that need a different path. Begins with /.",
@@ -561,6 +569,7 @@ public enum EnvVars {
         trustProxy, rateLimitAuthPer15Min,
         logLevel, logFormat,
         refreshHour, chartsHour, workerCount,
+        metadataSnapshotEnabled,
         healthcheckPath,
     ]
 }

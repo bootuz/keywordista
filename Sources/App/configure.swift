@@ -74,6 +74,12 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(AddCreatorUserIdToWatchedApp())
     app.migrations.add(AddCreatorUserIdToKeyword())
     app.migrations.add(EncryptExistingSecrets(secretBox: secretBox))
+    // Competitor analysis (v2). Order matters: AddKindToWatchedApp must
+    // run before CreateAppMetadataSnapshot only insofar as both depend on
+    // CreateWatchedApp; they are independent of each other but registered
+    // contiguously so the diff is easy to read.
+    app.migrations.add(AddKindToWatchedApp())
+    app.migrations.add(CreateAppMetadataSnapshot())
 
     try await app.autoMigrate()
 
@@ -117,6 +123,17 @@ public func configure(_ app: Application) async throws {
     app.queues.schedule(RefreshChartsScheduler())
         .daily()
         .at("4:00am")
+    // Competitor analysis (v2): the metadata-snapshot pass slots
+    // between the two existing daily jobs so the three don't stack on
+    // the same minute (single-worker queue would serialize them anyway,
+    // but spacing the schedule makes logs readable). The env-var kill
+    // switch lets Docker users who only care about keyword tracking
+    // opt out — when false, the job simply isn't registered.
+    if try manifest.require(EnvVars.metadataSnapshotEnabled) {
+        app.queues.schedule(DailyMetadataSnapshotJob())
+            .daily()
+            .at("3:30am")
+    }
 
     app.queues.configuration.workerCount = 1
 
