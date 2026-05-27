@@ -169,14 +169,22 @@
             class:dark:bg-zinc-800={isHighlighted}
           >
             <span
-              class="grid h-4 w-4 place-items-center rounded-full border text-[10px]"
+              class="grid h-4 w-4 place-items-center rounded-full border"
               class:border-amber-500={active}
               class:bg-amber-500={active}
               class:text-zinc-950={active}
               class:border-zinc-300={!active}
               class:dark:border-zinc-700={!active}
             >
-              {active ? '•' : ''}
+              {#if active}
+                <!-- Pure-CSS filled dot. Replaces the Unicode '•' (U+2022
+                     BULLET) glyph which renders significantly above the
+                     baseline in most fonts, putting it visually
+                     off-center inside the radio circle. bg-current
+                     inherits the parent's text-zinc-950 so the dot
+                     reads as dark-on-amber. -->
+                <span class="block h-1.5 w-1.5 rounded-full bg-current"></span>
+              {/if}
             </span>
             <span>{isoCountryToFlag(cc)}</span>
             <span class="text-zinc-800 dark:text-zinc-200">{appStoreCountryName(cc)}</span>
