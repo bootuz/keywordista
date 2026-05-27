@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getDashboard, listApps, refreshAll } from '../lib/api';
+  import { getDashboard, listApps, refreshKeyword } from '../lib/api';
   import {
     dashboard,
     apps,
@@ -16,6 +16,7 @@
     collapsedGroups,
     currentAppId,
     appScopedRows,
+    filteredRows,
   } from '../lib/viewState';
   import DashboardRow from './DashboardRow.svelte';
   import AddKeywordModal from './AddKeywordModal.svelte';
@@ -158,23 +159,59 @@
     ensurePolling();
   });
 
+  // Number of keywords the next Refresh click would dispatch. Equals
+  // $filteredRows.length collapsed by keywordId (the same keyword can
+  // appear in multiple rows when it's tracked across multiple watched
+  // apps; one refresh dispatch covers all rank checks for it). The
+  // button reflects this count so the user always sees the actual
+  // scope — "Refresh (302)" with no filters, "Refresh (12)" with
+  // filters narrowing the table.
+  const refreshableCount = $derived(
+    new Set($filteredRows.map((r) => r.keywordId)).size,
+  );
+
   async function onRefreshAll() {
     if (refreshAllActive) return;
     const startedAt = new Date();
-    // Batch = every keyword visible in the current app context. Filters and
-    // grouping don't change the batch — Refresh All means "everything tracked
-    // for this app", not "everything currently filtered to."
-    const ids = $appScopedRows.map((r) => r.keywordId);
+    // Batch = every keyword visible in the current filter. With no filters
+    // active this equals "all keywords for the current app". Deduping
+    // by keywordId because (keyword × watched_app) rows share a single
+    // refresh dispatch — the backend re-checks rank for every watched
+    // app under one keyword in a single job.
+    const ids = [...new Set($filteredRows.map((r) => r.keywordId))];
     if (ids.length === 0) return;
 
     // Mark every row as refreshing, persist the batch, then dispatch.
     for (const id of ids) markRefreshing(id, startedAt);
     refreshBatch.set({ ids, startedAt });
     try {
-      await refreshAll();
+      // Fan out per-keyword dispatches in parallel. allSettled keeps the
+      // batch alive when individual dispatches fail (deleted keyword,
+      // transient 5xx) — we clear spinners only for the failed ids so the
+      // succeeded ones still get their rank polled to completion.
+      const results = await Promise.allSettled(ids.map((id) => refreshKeyword(id)));
+      const failed = results
+        .map((r, i) => (r.status === 'rejected' ? ids[i] : null))
+        .filter((x): x is string => x !== null);
+      if (failed.length > 0) {
+        for (const id of failed) {
+          refreshing.update((m) => { const n = new Map(m); n.delete(id); return n; });
+        }
+        if (failed.length === ids.length) {
+          // Every dispatch rejected — likely a 5xx storm or auth lost.
+          // Drop the batch entirely so the chip doesn't sit at 0/N forever.
+          refreshBatch.set(null);
+          throw new Error(`Refresh failed for ${failed.length} keyword${failed.length === 1 ? '' : 's'}`);
+        }
+        // Partial failure: shrink the batch so the progress chip's
+        // denominator reflects only the rows we expect to see update.
+        refreshBatch.update((b) => (b ? { ...b, ids: b.ids.filter((id) => !failed.includes(id)) } : b));
+      }
       ensurePolling();
     } catch (err) {
-      // If the dispatch itself failed (e.g. 5xx), drop the batch + spinners.
+      // If the fan-out itself threw (network catastrophe, etc.), drop the
+      // batch + spinners. allSettled above wouldn't throw — this catches
+      // the rare unhandled case.
       refreshBatch.set(null);
       for (const id of ids) refreshing.update((m) => { const n = new Map(m); n.delete(id); return n; });
       throw err;
@@ -227,9 +264,13 @@
         {:else}
           <button
             onclick={onRefreshAll}
-            class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            disabled={refreshableCount === 0}
+            title={refreshableCount === 0
+              ? 'No keywords match the current filters'
+              : `Refresh ${refreshableCount} keyword${refreshableCount === 1 ? '' : 's'} (everything visible in the table)`}
+            class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Refresh all
+            Refresh ({refreshableCount})
           </button>
         {/if}
         <button
