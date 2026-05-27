@@ -48,14 +48,22 @@ export async function pollOnce(): Promise<void> {
   if (inFlight) return;
   inFlight = true;
   try {
-    const since = readLastSeen() ?? undefined;
+    const lastSeen = readLastSeen();
+    const since = lastSeen ?? undefined;
     const fresh = await getChartEvents(since, 50);
     if (fresh.length > 0) {
-      // Server returns newest-first. Fire notifications in chronological
-      // order so the last toast on the screen is the most recent event.
-      const chronological = [...fresh].reverse();
-      for (const ev of chronological) {
-        notify(ev);
+      // First-ever poll (no prior lastSeen): prime the marker but DO
+      // NOT notify for the backlog. Mirrors loadInitialEvents()'s
+      // safeguard — without it, landing on the Dashboard first triggers
+      // a notification flood for every chart event that ever happened.
+      // The next poll will see real "new since now" events only.
+      if (lastSeen !== null) {
+        // Server returns newest-first. Fire notifications in chronological
+        // order so the last toast on the screen is the most recent event.
+        const chronological = [...fresh].reverse();
+        for (const ev of chronological) {
+          notify(ev);
+        }
       }
       writeLastSeen(fresh[0].createdAt);
       chartEvents.update((existing) => {

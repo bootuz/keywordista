@@ -116,14 +116,32 @@
             class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             <span
-              class="grid h-4 w-4 place-items-center rounded border text-[10px]"
+              class="grid h-4 w-4 place-items-center rounded border"
               class:border-amber-500={active}
               class:bg-amber-500={active}
               class:text-zinc-950={active}
               class:border-zinc-300={!active}
               class:dark:border-zinc-700={!active}
             >
-              {active ? '✓' : ''}
+              {#if active}
+                <!-- Heroicons mini/check (MIT). Symmetric SVG geometry
+                     avoids the font-metric asymmetry of the Unicode
+                     '✓' (U+2713), which renders nudged toward the top
+                     of its bounding box in SF Pro / system-ui. -->
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="h-3 w-3"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              {/if}
             </span>
             <span>{isoCountryToFlag(cc)}</span>
             <span class="w-7 font-mono text-xs uppercase text-zinc-500">{cc}</span>
