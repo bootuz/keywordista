@@ -18,7 +18,7 @@ Tracks where your apps rank for a set of keywords across any of Apple's 175 App 
 > macOS 13+.
 
 <!-- LATEST_DMG_BEGIN -->
-**Download the latest DMG:** [Keywordista-0.5.0-beta1.dmg](https://github.com/bootuz/keywordista/releases/download/app-v0.5.0-beta1/Keywordista-0.5.0-beta1.dmg) (signed + notarized). Drag `Keywordista.app` into `/Applications` and launch — a magnifying-glass icon appears in your menu bar.
+**Download the latest DMG:** [Keywordista-0.5.0.dmg](https://github.com/bootuz/keywordista/releases/download/app-v0.5.0/Keywordista-0.5.0.dmg) (signed + notarized). Drag `Keywordista.app` into `/Applications` and launch — a magnifying-glass icon appears in your menu bar.
 <!-- LATEST_DMG_END -->
 
 Click **Open Dashboard** → the browser opens `http://127.0.0.1:8080/` (auto-picks `:8081…:8090` if `:8080` is taken). For other versions, see [all releases](https://github.com/bootuz/keywordista/releases?q=app-v).
