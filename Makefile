@@ -1,4 +1,4 @@
-.PHONY: dev-backend dev-web build-web build run install-web check-web clean-web mac-app open-mac-app dmg dmg-unsigned docker-build docker-smoke help
+.PHONY: dev-backend dev-web build-web build run install-web check-web clean-web mac-app open-mac-app dmg dmg-unsigned docker-build docker-smoke mcp-install mcp-build mcp-check mcp-inspector help
 
 .DEFAULT_GOAL := run
 
@@ -18,6 +18,10 @@ help:
 	@echo "  make dmg-unsigned  — build an unsigned DMG (skips signing + notarizing)"
 	@echo "  make docker-build  — build the server Docker image as keywordista:dev"
 	@echo "  make docker-smoke  — docker-build + run, hit /health, tear down"
+	@echo "  make mcp-install   — npm install in mcp/"
+	@echo "  make mcp-build     — compile the MCP server (dist/) for Claude Desktop / CLI"
+	@echo "  make mcp-check     — run the MCP server's vitest suite"
+	@echo "  make mcp-inspector — open the official MCP Inspector against dist/index.js"
 
 dev-backend:
 	KEYWORDISTA_MODE=local swift run
@@ -78,6 +82,22 @@ docker-build:
 # locally to validate the image without setting up a real deployment.
 # `set -e` so the docker stop runs even when curl fails — gives us logs
 # on failure instead of a silent hang.
+# MCP server (mcp/) — exposes the Vapor API as Model Context Protocol tools
+# so Claude Desktop / Claude Code / any MCP client can read & manage
+# tracking data. Stdio transport, TypeScript, runs alongside the menubar
+# app (or any local `swift run` instance).
+mcp-install:
+	cd mcp && npm install
+
+mcp-build: mcp-install
+	cd mcp && npm run build
+
+mcp-check:
+	cd mcp && npm test
+
+mcp-inspector: mcp-build
+	cd mcp && npm run inspector
+
 docker-smoke: docker-build
 	@echo "→ Starting keywordista:dev with a throwaway encryption key"
 	@docker rm -f keywordista-smoke >/dev/null 2>&1 || true

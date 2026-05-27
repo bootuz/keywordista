@@ -70,6 +70,13 @@ final class AppCoordinator: ObservableObject {
         self.lifecycle = lifecycle
         self.providers = providers
 
+        // Publish the supervisor to the shutdown delegate so it can drive
+        // a clean child-process termination on Quit / SIGTERM / SIGINT.
+        // Without this, the spawned keywordista-server is orphaned on app
+        // exit and keeps holding its port until manually killed. See
+        // AppShutdownDelegate for the full lifecycle commentary.
+        AppSupervisorRegistry.supervisor = supervisor
+
         // ── Reactive wiring ──────────────────────────────────────
 
         // Sync local instance into InstanceStore on every supervisor
@@ -218,6 +225,14 @@ final class AppCoordinator: ObservableObject {
 /// it happens.
 @main
 struct KeywordistaApp: App {
+    // NSApplicationDelegateAdaptor instantiates AppShutdownDelegate
+    // *before* SwiftUI evaluates the body — that's why the delegate
+    // finds the supervisor via AppSupervisorRegistry rather than
+    // taking it in init. The adaptor is the only way to plug an
+    // NSApplicationDelegate into a SwiftUI App without throwing away
+    // SwiftUI's own AppKit wiring (which is what plain
+    // NSApp.delegate = ... would do).
+    @NSApplicationDelegateAdaptor(AppShutdownDelegate.self) private var shutdownDelegate
     @StateObject private var coord = AppCoordinator()
 
     var body: some Scene {

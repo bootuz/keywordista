@@ -115,6 +115,12 @@ final class ServiceSupervisor: ObservableObject {
             try process.run()
             self.process = process
             status = .running
+            // Publish the chosen base URL to a sidecar file. The Keywordista
+            // MCP server (mcp/) reads this to find us — without it, an MCP
+            // client would have to guess our port, since we pick from the
+            // 8080–8090 range at boot. Best-effort: a write failure here is
+            // a degraded-discovery state, not a startup failure.
+            writeRuntimeSidecar(port: chosenPort, pid: process.processIdentifier)
         } catch {
             status = .crashed(reason: "failed to launch: \(error.localizedDescription)")
         }
@@ -137,6 +143,39 @@ final class ServiceSupervisor: ObservableObject {
         }
         self.process = nil
         status = .stopped
+        removeRuntimeSidecar()
+    }
+
+    // MARK: - Runtime sidecar (MCP discovery)
+    //
+    // The sidecar file at <dataDir>/runtime.json publishes our base URL so
+    // the Keywordista MCP server can find us without probing every port.
+    // Shape:
+    //   { "baseURL": "http://127.0.0.1:8083", "pid": 12345, "writtenAt": "<iso>" }
+    //
+    // Lifecycle: written after a successful `process.run()` in start(),
+    // removed in stop(). On a crash the file is stale until next boot —
+    // acceptable because the MCP server will fall back to probing if the
+    // file points at a dead port.
+
+    private var runtimeSidecarURL: URL {
+        dataDir.appendingPathComponent("runtime.json")
+    }
+
+    private func writeRuntimeSidecar(port: UInt16, pid: Int32) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let payload: [String: Any] = [
+            "baseURL": "http://127.0.0.1:\(port)",
+            "pid": Int(pid),
+            "writtenAt": formatter.string(from: Date()),
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) else { return }
+        try? data.write(to: runtimeSidecarURL, options: [.atomic])
+    }
+
+    private func removeRuntimeSidecar() {
+        try? FileManager.default.removeItem(at: runtimeSidecarURL)
     }
 
     // MARK: - Child-process environment

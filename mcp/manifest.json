@@ -1,0 +1,46 @@
+{
+  "manifest_version": "0.2",
+  "name": "keywordista-mcp",
+  "display_name": "Keywordista",
+  "version": "0.1.0",
+  "description": "Read and manage your Keywordista App Store keyword tracker from Claude.",
+  "long_description": "Exposes the running Keywordista server (menubar app or self-hosted Docker) as MCP tools. Read your tracked apps, keywords, rank history, dashboard rollups, and chart movements; add or remove apps and keywords; trigger refreshes and wait for results. Auto-discovers the local server via env var, runtime sidecar, or port probe.",
+  "author": {
+    "name": "Astemir Boziev"
+  },
+  "homepage": "https://github.com/bootuz/keywordista",
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"]
+    }
+  },
+  "tools": [
+    { "name": "list_apps", "description": "List all tracked apps." },
+    { "name": "list_keywords", "description": "List all tracked keywords." },
+    { "name": "keyword_history", "description": "Rank-check timeline for a keyword (optionally one app)." },
+    { "name": "dashboard", "description": "Current rank rollup for every (keyword × app), optionally filtered by country." },
+    { "name": "chart_movements", "description": "Current chart positions plus recent entered/moved/exited events." },
+    { "name": "add_app", "description": "Track a new app by App Store ID." },
+    { "name": "add_keyword", "description": "Track a new keyword in a given country; optionally wait for the first rank." },
+    { "name": "remove_app", "description": "Stop tracking an app." },
+    { "name": "remove_keyword", "description": "Stop tracking a keyword." },
+    { "name": "refresh", "description": "Trigger a refresh (single keyword, all keywords, charts, or app storefront availability) and poll until done." }
+  ],
+  "user_config": {
+    "base_url": {
+      "type": "string",
+      "title": "Keywordista base URL (optional)",
+      "description": "Override the auto-discovered server URL, e.g. http://127.0.0.1:8080 or your Docker host.",
+      "required": false,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "linux", "win32"]
+  }
+}

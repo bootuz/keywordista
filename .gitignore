@@ -30,6 +30,12 @@ releases/
 *.pkg
 *.tar.gz
 
+# MCP server local
+mcp/node_modules/
+mcp/dist/
+mcp/coverage/
+mcp/*.tsbuildinfo
+
 # Editor / agent scratch dirs
 .claude/
 .superpowers/
