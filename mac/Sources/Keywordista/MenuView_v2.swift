@@ -69,12 +69,22 @@ struct MenuView_v2: View {
         Divider()
 
         Button("Quit Keywordista") {
-            // Drop the local child cleanly before terminating —
-            // otherwise the spawned Vapor process becomes an orphan
-            // listening on :8080 after the menu icon disappears.
+            // Stop the spawned Vapor child cleanly, then exit(0) —
+            // **bypassing** NSApp.terminate(nil). Empirically the
+            // AppKit termination dance hangs when reached from a
+            // Task context after `await`: AppKit's `.terminateLater`
+            // wait state (entered by `applicationShouldTerminate`)
+            // doesn't drain subsequent Task continuations on the
+            // main actor, so the delegate's
+            // `NSApp.reply(toApplicationShouldTerminate:)` never
+            // fires and Quit hangs forever. This is the same
+            // workaround `AppShutdownDelegate`'s SIGTERM signal
+            // handler uses — see its comment for the diagnosis.
+            // Since `supervisor.stop()` runs here we don't need the
+            // delegate's stop() invocation; `exit(0)` is safe.
             Task {
                 await supervisor.stop()
-                NSApp.terminate(nil)
+                exit(0)
             }
         }
         .keyboardShortcut("q")
