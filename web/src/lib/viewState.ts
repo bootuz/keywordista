@@ -1,5 +1,5 @@
 import { derived, writable } from 'svelte/store';
-import { dashboard } from './stores';
+import { dashboard, developerKeywords, isInDeveloperKeywords } from './stores';
 import type { DashboardRow } from './types';
 import {
   chain,
@@ -30,6 +30,12 @@ export interface FilterState {
   search: string;
   countries: string[]; // empty = all
   rankBucket: RankBucket;
+  /// AND-composes with rankBucket — when true, only rows whose
+  /// (appId, countryCode, term) lives in the App Store Connect
+  /// developer-keywords field for that storefront pass through.
+  /// Used to ask "which of my ASC-tagged keywords aren't ranking?"
+  /// and similar diagnostic questions.
+  inASCOnly: boolean;
   difficultyMin: number;
   difficultyMax: number;
   barrierMin: number;
@@ -51,6 +57,7 @@ export const DEFAULT_FILTERS: FilterState = {
   search: '',
   countries: [],
   rankBucket: 'all',
+  inASCOnly: false,
   difficultyMin: 0,
   difficultyMax: 5,
   barrierMin: 0,
@@ -130,10 +137,13 @@ export const appScopedRows = derived(
 );
 
 export const filteredRows = derived(
-  [appScopedRows, filters],
-  ([$appScopedRows, $filters], set) => {
+  // developerKeywords is a 3rd input so toggling the ASC filter re-runs
+  // immediately, and any background refresh of the ASC keyword list also
+  // re-applies the filter without the user clicking anything.
+  [appScopedRows, filters, developerKeywords],
+  ([$appScopedRows, $filters, $developerKeywords], set) => {
     // Debounce only the search field — other filters apply instantly.
-    const apply = () => set(applyFilters($appScopedRows, $filters));
+    const apply = () => set(applyFilters($appScopedRows, $filters, $developerKeywords));
     if ($filters.search) {
       const handle = setTimeout(apply, SEARCH_DEBOUNCE_MS);
       return () => clearTimeout(handle);
@@ -155,7 +165,11 @@ export const groupedSections = derived(
 
 // ── Filter logic ──────────────────────────────────────────────────────────
 
-function applyFilters(rows: DashboardRow[], f: FilterState): DashboardRow[] {
+function applyFilters(
+  rows: DashboardRow[],
+  f: FilterState,
+  devKw: Map<string, Map<string, Set<string>>>,
+): DashboardRow[] {
   const needle = f.search.trim().toLowerCase();
   return rows.filter((r) => {
     if (needle && !r.term.toLowerCase().includes(needle) && !r.watchedAppName.toLowerCase().includes(needle)) {
@@ -163,6 +177,15 @@ function applyFilters(rows: DashboardRow[], f: FilterState): DashboardRow[] {
     }
     if (f.countries.length && !f.countries.includes(r.countryCode)) return false;
     if (!matchesBucket(r, f.rankBucket)) return false;
+    // ASC tag filter — orthogonal to rankBucket. AND-composes: when the
+    // user picks "Top 50 + ASC", we want top-50 rows that are *also* in
+    // ASC. When the dev-keywords map is empty (first paint / API error)
+    // the lookup returns false for every row, so toggling ASC ON with no
+    // data simply yields zero rows — preferred over silently showing
+    // everything, since the user has explicitly asked to filter by ASC.
+    if (f.inASCOnly && !isInDeveloperKeywords(devKw, r.watchedAppId, r.countryCode, r.term)) {
+      return false;
+    }
     if (r.difficulty < f.difficultyMin || r.difficulty > f.difficultyMax) return false;
     if (r.entryBarrier < f.barrierMin || r.entryBarrier > f.barrierMax) return false;
     return true;
