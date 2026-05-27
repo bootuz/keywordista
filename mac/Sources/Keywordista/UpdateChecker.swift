@@ -44,9 +44,12 @@ final class UpdateChecker: ObservableObject {
     // lifetime so the weak ref will never be nil in practice.
     private weak var supervisor: ServiceSupervisor?
 
-    // 6-hour cadence + an initial check 5s after launch. Well under
-    // GitHub's 60-req/hour unauthenticated rate limit.
-    private let pollInterval: TimeInterval = 6 * 60 * 60
+    // 30-minute cadence + an initial check 5s after launch. At 2 req/hour
+    // we're still safely under GitHub's 60-req/hour unauthenticated rate
+    // limit; the tighter cadence means a freshly-shipped service release
+    // reaches installed cockpits within half an hour instead of up to six.
+    // Users who can't wait can use the "Check for updates" menu item.
+    private let pollInterval: TimeInterval = 30 * 60
     private let initialDelay: UInt64 = 5_000_000_000
     private var pollTask: Task<Void, Never>?
 

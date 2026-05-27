@@ -152,8 +152,24 @@ struct MenuView_v2: View {
     @ViewBuilder
     private var updateSection: some View {
         switch updates.status {
-        case .idle, .checking:
-            EmptyView()
+        case .idle:
+            // Manual-check affordance. The background poll runs every 30
+            // minutes (see UpdateChecker.pollInterval), but expose a
+            // user-triggered path too so a user expecting a just-shipped
+            // release doesn't have to wait for the next poll.
+            Button("Check for updates") {
+                Task { await updates.checkNow() }
+            }
+            Divider()
+
+        case .checking:
+            // Mirror .idle's slot with a non-interactive indicator so
+            // the row doesn't visually "disappear" the instant a check
+            // starts — that would be a confusing UX (button vanishes
+            // → user assumes click failed).
+            Text("Checking for updates…")
+                .foregroundStyle(.secondary)
+            Divider()
 
         case .available(let version, _):
             Text("● Service update available: v\(version)")
