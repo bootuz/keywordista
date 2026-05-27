@@ -1,0 +1,158 @@
+/**
+ * Read-only workflow tools.
+ *
+ * Each tool returns *structured* output (validated against a zod schema) so
+ * MCP clients that support `structuredContent` can render it natively, plus
+ * a text fallback for chat-only clients. The text fallback is intentionally
+ * brief — a one-line summary, not a re-dump of the structured data.
+ */
+import { z } from "zod";
+import type { ApiClient } from "../client.js";
+import {
+  WatchedApp,
+  Keyword,
+  HistoryPoint,
+  DashboardRow,
+  ChartPositionDTO,
+  ChartEventDTO,
+} from "../schemas.js";
+
+// ---------------------------------------------------------------------------
+// list_apps
+// ---------------------------------------------------------------------------
+export const listAppsInput = z.object({}).strict();
+export const listAppsOutput = z.object({
+  apps: z.array(WatchedApp),
+  count: z.number().int(),
+});
+
+export async function listApps(client: ApiClient, _input: z.infer<typeof listAppsInput>) {
+  const raw = await client.get<unknown>("/apps");
+  const apps = z.array(WatchedApp).parse(raw);
+  return { apps, count: apps.length };
+}
+
+// ---------------------------------------------------------------------------
+// list_keywords
+// ---------------------------------------------------------------------------
+export const listKeywordsInput = z.object({}).strict();
+export const listKeywordsOutput = z.object({
+  keywords: z.array(Keyword),
+  count: z.number().int(),
+});
+
+export async function listKeywords(client: ApiClient, _input: z.infer<typeof listKeywordsInput>) {
+  const raw = await client.get<unknown>("/keywords");
+  const keywords = z.array(Keyword).parse(raw);
+  return { keywords, count: keywords.length };
+}
+
+// ---------------------------------------------------------------------------
+// keyword_history
+// ---------------------------------------------------------------------------
+export const keywordHistoryInput = z
+  .object({
+    keywordId: z.string().uuid().describe("UUID of the keyword (from `list_keywords`)."),
+    watchedAppId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe("Optional — filter the timeline to one tracked app."),
+  })
+  .strict();
+export const keywordHistoryOutput = z.object({
+  keywordId: z.string().uuid(),
+  watchedAppId: z.string().uuid().nullable(),
+  points: z.array(HistoryPoint),
+  count: z.number().int(),
+});
+
+export async function keywordHistory(client: ApiClient, input: z.infer<typeof keywordHistoryInput>) {
+  const raw = await client.get<unknown>(`/keywords/${input.keywordId}/history`, {
+    ...(input.watchedAppId !== undefined ? { watchedAppId: input.watchedAppId } : {}),
+  });
+  const points = z.array(HistoryPoint).parse(raw);
+  return {
+    keywordId: input.keywordId,
+    watchedAppId: input.watchedAppId ?? null,
+    points,
+    count: points.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// dashboard
+// ---------------------------------------------------------------------------
+export const dashboardInput = z
+  .object({
+    country: z
+      .string()
+      .length(2)
+      .optional()
+      .describe("Optional 2-letter ISO country code (e.g. 'us', 'de'). Lowercase."),
+  })
+  .strict();
+export const dashboardOutput = z.object({
+  rows: z.array(DashboardRow),
+  count: z.number().int(),
+  countryFilter: z.string().nullable(),
+});
+
+export async function dashboard(client: ApiClient, input: z.infer<typeof dashboardInput>) {
+  const raw = await client.get<unknown>(
+    "/dashboard",
+    input.country !== undefined ? { country: input.country } : undefined,
+  );
+  const rows = z.array(DashboardRow).parse(raw);
+  return { rows, count: rows.length, countryFilter: input.country ?? null };
+}
+
+// ---------------------------------------------------------------------------
+// chart_movements
+// ---------------------------------------------------------------------------
+// Composite read: returns the current charted positions for all tracked apps
+// PLUS the recent activity feed (entered/moved/exited events). One tool call
+// answers "what's happening on the charts right now?" without the agent
+// having to compose two reads + reconcile them.
+export const chartMovementsInput = z
+  .object({
+    since: z
+      .string()
+      .datetime({ offset: true })
+      .optional()
+      .describe("ISO8601 timestamp — only return events after this. Defaults to ~24h ago server-side semantics."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe("Max events to return (1–200, default 50)."),
+  })
+  .strict();
+export const chartMovementsOutput = z.object({
+  positions: z.array(ChartPositionDTO),
+  events: z.array(ChartEventDTO),
+  positionsCount: z.number().int(),
+  eventsCount: z.number().int(),
+});
+
+export async function chartMovements(client: ApiClient, input: z.infer<typeof chartMovementsInput>) {
+  // Fire both reads in parallel — they're independent and the server handles
+  // them cheaply. Halves the wall-clock for the agent.
+  const [positionsRaw, eventsRaw] = await Promise.all([
+    client.get<unknown>("/chart-positions"),
+    client.get<unknown>("/chart-events", {
+      ...(input.since !== undefined ? { since: input.since } : {}),
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    }),
+  ]);
+  const positions = z.array(ChartPositionDTO).parse(positionsRaw);
+  const events = z.array(ChartEventDTO).parse(eventsRaw);
+  return {
+    positions,
+    events,
+    positionsCount: positions.length,
+    eventsCount: events.length,
+  };
+}
