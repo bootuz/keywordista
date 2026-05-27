@@ -8,11 +8,19 @@
     type RankBucket,
   } from '../lib/viewState';
   import type { GroupBy } from '../lib/grouping';
-  import { dashboard } from '../lib/stores';
+  import { dashboard, developerKeywords } from '../lib/stores';
   import CountrySelect from './CountrySelect.svelte';
 
   // Recompute available countries when the dashboard changes (add/delete).
   const countries = $derived(uniqueCountriesFrom($dashboard));
+
+  // Whether the ASC filter has any data to match against. Empty map means
+  // ASC creds aren't configured (or the GET /api/v1/settings/asc/keywords
+  // call returned {}). We disable the toggle in that case so the user
+  // can't toggle into a confusing zero-row state. If they're already ON
+  // when creds get cleared, the "Clear filters" link is the escape
+  // hatch — isDirty includes inASCOnly so it renders.
+  const hasASCData = $derived($developerKeywords.size > 0);
 
   function setCountries(next: string[]) {
     filters.update((f) => ({ ...f, countries: next }));
@@ -38,10 +46,15 @@
     filters.update((f) => ({ ...f, rankBucket: b }));
   }
 
+  function toggleASC() {
+    filters.update((f) => ({ ...f, inASCOnly: !f.inASCOnly }));
+  }
+
   const isDirty = $derived(
     $filters.search !== DEFAULT_FILTERS.search ||
       $filters.countries.length > 0 ||
       $filters.rankBucket !== DEFAULT_FILTERS.rankBucket ||
+      $filters.inASCOnly !== DEFAULT_FILTERS.inASCOnly ||
       $filters.difficultyMin !== DEFAULT_FILTERS.difficultyMin ||
       $filters.difficultyMax !== DEFAULT_FILTERS.difficultyMax ||
       $filters.barrierMin !== DEFAULT_FILTERS.barrierMin ||
@@ -84,6 +97,42 @@
           {bucket.label}
         </button>
       {/each}
+    </div>
+
+    <!--
+      ASC toggle — orthogonal to rankBucket (AND-composes via the
+      predicate in viewState.applyFilters). Styled to match the rank pill
+      group's *active* state when ON so it visually reads as "filter
+      currently engaged"; matches the inactive state when OFF so it reads
+      as "available filter". The single-pill wrapper mirrors the rank
+      group's chrome, keeping both filter affordances visually aligned
+      while signalling they're different concepts (one group of radios
+      vs one toggle).
+    -->
+    <div class="flex items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-0.5">
+      <button
+        type="button"
+        onclick={toggleASC}
+        disabled={!hasASCData}
+        title={hasASCData
+          ? 'Show only keywords in your App Store Connect keywords field'
+          : 'Configure App Store Connect API credentials in Settings to use this filter'}
+        aria-pressed={$filters.inASCOnly}
+        class={[
+          'rounded px-2 py-0.5 text-xs font-medium uppercase tracking-wide transition',
+          // Disabled state gets standard opacity treatment + not-allowed
+          // cursor; the title attribute carries the why.
+          'disabled:cursor-not-allowed disabled:opacity-50',
+          // Svelte's `class:` directive can't handle slashes in Tailwind
+          // arbitrary-opacity utilities (bg-amber-500/20, ring-amber-500/30),
+          // so the conditional state lives in this template literal instead.
+          $filters.inASCOnly
+            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/30'
+            : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100',
+        ].join(' ')}
+      >
+        ASC
+      </button>
     </div>
 
     {#if isDirty}
