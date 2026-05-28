@@ -137,14 +137,40 @@
     }
   }
 
-  // Pull the iPhone screenshots from each app's latest snapshot for the
-  // strip rendering. Stored as JSON strings server-side; the strip
-  // component parses defensively.
-  function screenshotsJSON(appId: string): string | null {
-    if (compareData?.ownApp?.id === appId) return compareData.ownApp.latest?.screenshotURLsJSON ?? null;
-    return (
-      compareData?.competitors.find((c) => c.id === appId)?.latest?.screenshotURLsJSON ?? null
-    );
+  // Pull both screenshot sets from each app's latest snapshot. Apps
+  // come in three flavors that all need to render correctly:
+  //   • iPhone-only — has screenshotURLsJSON, ipad is null/empty.
+  //   • iPad-only (Azri is one) — screenshotURLsJSON is empty but
+  //     ipadScreenshotURLsJSON has content. Previously this rendered
+  //     blank because we only read the iPhone field.
+  //   • Universal — both populated; we stack them so the user can
+  //     compare iPhone-to-iPhone AND iPad-to-iPad against competitors.
+  //
+  // Returns nullable strings (raw JSON from the server); ScreenshotStrip
+  // parses defensively.
+  function screenshotSets(appId: string): { iphone: string | null; ipad: string | null } {
+    const latest =
+      compareData?.ownApp?.id === appId
+        ? compareData.ownApp.latest
+        : compareData?.competitors.find((c) => c.id === appId)?.latest ?? null;
+    return {
+      iphone: latest?.screenshotURLsJSON ?? null,
+      ipad: latest?.ipadScreenshotURLsJSON ?? null,
+    };
+  }
+
+  /// Returns true when there is at least one parseable URL in the raw
+  /// JSON string. Used by the template to decide whether to render a
+  /// strip at all (avoiding the "No screenshots available" empty state
+  /// next to a populated sibling strip — looks misleading).
+  function hasAny(json: string | null): boolean {
+    if (!json) return false;
+    try {
+      const parsed: unknown = JSON.parse(json);
+      return Array.isArray(parsed) && parsed.some((v) => typeof v === 'string');
+    } catch {
+      return false;
+    }
   }
 </script>
 
@@ -237,16 +263,36 @@
         Screenshots
       </h2>
       {#if compareData.ownApp}
-        <div>
-          <h3 class="text-sm font-medium text-zinc-800 dark:text-zinc-200 mb-1">
+        {@const sets = screenshotSets(compareData.ownApp.id)}
+        {@const hasIphone = hasAny(sets.iphone)}
+        {@const hasIpad = hasAny(sets.ipad)}
+        <div class="space-y-2">
+          <h3 class="text-sm font-medium text-zinc-800 dark:text-zinc-200">
             {compareData.ownApp.name} <span class="text-xs text-emerald-700 dark:text-emerald-300">(You)</span>
           </h3>
-          <ScreenshotStrip json={screenshotsJSON(compareData.ownApp.id)} />
+          {#if !hasIphone && !hasIpad}
+            <!-- Neither device has screenshots — render one empty strip
+                 so the "No screenshots available" placeholder appears
+                 (preserves the prior empty-state UX). -->
+            <ScreenshotStrip json={null} />
+          {:else}
+            {#if hasIphone}
+              <p class="text-xs text-zinc-500 uppercase tracking-wide">iPhone</p>
+              <ScreenshotStrip json={sets.iphone} />
+            {/if}
+            {#if hasIpad}
+              <p class="text-xs text-zinc-500 uppercase tracking-wide">iPad</p>
+              <ScreenshotStrip json={sets.ipad} />
+            {/if}
+          {/if}
         </div>
       {/if}
       {#each compareData.competitors as competitor (competitor.id)}
-        <div>
-          <div class="flex items-center justify-between mb-1">
+        {@const sets = screenshotSets(competitor.id)}
+        {@const hasIphone = hasAny(sets.iphone)}
+        {@const hasIpad = hasAny(sets.ipad)}
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
             <h3 class="text-sm font-medium text-zinc-800 dark:text-zinc-200">{competitor.name}</h3>
             <button
               type="button"
@@ -256,7 +302,18 @@
               Remove
             </button>
           </div>
-          <ScreenshotStrip json={screenshotsJSON(competitor.id)} />
+          {#if !hasIphone && !hasIpad}
+            <ScreenshotStrip json={null} />
+          {:else}
+            {#if hasIphone}
+              <p class="text-xs text-zinc-500 uppercase tracking-wide">iPhone</p>
+              <ScreenshotStrip json={sets.iphone} />
+            {/if}
+            {#if hasIpad}
+              <p class="text-xs text-zinc-500 uppercase tracking-wide">iPad</p>
+              <ScreenshotStrip json={sets.ipad} />
+            {/if}
+          {/if}
         </div>
       {/each}
     </section>
