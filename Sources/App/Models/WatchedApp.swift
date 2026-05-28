@@ -5,11 +5,14 @@ import Vapor
 /// Distinguishes apps the user actively tracks for ranks/charts (`own`)
 /// from competitor apps tracked only for metadata snapshotting
 /// (`competitor`). The flag is load-bearing: `RefreshService` and
-/// `ChartTrackerService` filter on `kind == .own` so competitors never
-/// enter the iTunes-rate-budget refresh pipeline. `KeywordService.create`
-/// rejects keyword-creation against a competitor's id for the same reason
-/// (a competitor with keywords would behave indistinguishably from an own
-/// app and silently pull iTunes traffic the user never asked for).
+/// `ChartTrackerService` filter on `typedKind == .own` so competitors
+/// never enter the iTunes-rate-budget refresh pipeline.
+///
+/// Keywords themselves are GLOBAL — `KeywordService.create` takes only
+/// `(term, countryCode)` and is not per-app, so no kind-based guard
+/// lives there. Competitors are excluded from the rank pipeline purely
+/// via the `RefreshService` filter; if you ever introduce per-app
+/// keywords, add the matching guard at the keyword create site.
 enum WatchedAppKind: String, Codable, Sendable {
     case own
     case competitor
@@ -133,8 +136,13 @@ struct AddPrimaryGenreIdToWatchedApp: AsyncMigration {
 // metadata-snapshot pipeline scoops them up. Default 'own' backfills
 // every pre-existing row to the conservative interpretation — they were
 // added before competitor tracking existed, so they're the user's apps.
-// REQUIRED column (NOT NULL) because every code path that reads it
-// expects a value; the default backfill makes this safe.
+//
+// The column is NULLABLE on the schema side (deliberately — see
+// `prepare()`). NULL-safety at read time comes from `WatchedApp.typedKind`'s
+// `?? .own` coercion plus the backfill UPDATE that runs in this same
+// migration. A partially-applied migration is therefore safe: pre-backfill
+// rows read as `.own` via the coercion, and no code path is required
+// to handle NULL explicitly.
 struct AddKindToWatchedApp: AsyncMigration {
     func prepare(on database: Database) async throws {
         try await database.schema(WatchedApp.schema)

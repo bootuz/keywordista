@@ -38,6 +38,12 @@
 
   async function loadAppsAndCompetitors(): Promise<void> {
     try {
+      // Snapshot the previous competitor ID set BEFORE the fetch so
+      // we can detect newly-added rows after the API returns.
+      const previousCompetitorIds = new Set(
+        ($competitors ?? []).map((c) => c.id),
+      );
+
       const [ownList, compList] = await Promise.all([listApps(), listCompetitors()]);
       // The /apps endpoint returns ALL apps (own + competitor); for
       // the own-app picker we filter to own only. The competitors
@@ -45,11 +51,26 @@
       // since it already filters server-side.
       apps.set(ownList.filter((a) => a.kind === 'own'));
       competitors.set(compList);
-      // Default selection: first own app, all competitors.
+      // Default own-app selection on first load.
       const ownApps = ownList.filter((a) => a.kind === 'own');
       if (!ownAppID && ownApps.length > 0) ownAppID = ownApps[0].id;
-      if (selectedCompetitorIDs.length === 0) {
+      // Selection rules:
+      //   • First load (no prior set): select every competitor — the
+      //     diff is most useful when everything is visible by default.
+      //   • Subsequent reloads (e.g. after AddCompetitorModal onAdded
+      //     fires): auto-select any *new* competitor that wasn't in the
+      //     prior set so the user sees their just-added row without
+      //     having to re-tick the checkbox. We preserve existing
+      //     selections by union-ing with the current set.
+      if (previousCompetitorIds.size === 0) {
         selectedCompetitorIDs = compList.map((c) => c.id);
+      } else {
+        const newlyAddedIds = compList
+          .map((c) => c.id)
+          .filter((id) => !previousCompetitorIds.has(id));
+        if (newlyAddedIds.length > 0) {
+          selectedCompetitorIDs = [...selectedCompetitorIDs, ...newlyAddedIds];
+        }
       }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

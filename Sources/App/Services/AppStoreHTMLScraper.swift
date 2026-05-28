@@ -118,12 +118,18 @@ struct AppStoreHTMLScraper: AppStoreHTMLScraperProtocol {
         let raw = String(html[captureRange])
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
+        // CRITICAL: decode `&amp;` LAST. `&amp;` is the escape for a
+        // literal `&`, and the other entities all START with `&`. If we
+        // decoded `&amp;` first, an input encoding a literal `&quot;`
+        // as `&amp;quot;` would become `&quot;`, then a downstream pass
+        // would over-decode it to a real `"`. Saving `&amp;` for last
+        // ensures any `&` it emits cannot seed further entity matches.
         return trimmed
-            .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&#39;", with: "'")
             .replacingOccurrences(of: "&apos;", with: "'")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
     }
 }

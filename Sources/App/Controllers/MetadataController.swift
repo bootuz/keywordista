@@ -38,11 +38,23 @@ struct MetadataController: RouteCollection {
     @Sendable func history(req: Request) async throws -> [AppMetadataSnapshot] {
         let appID = try Self.appID(from: req)
         let country = Self.country(from: req)
-        let limit = (try? req.query.get(Int.self, at: "limit")) ?? 50
+        let requested = (try? req.query.get(Int.self, at: "limit")) ?? 50
+        // Cap user-supplied limit. Without this a `?limit=10_000_000`
+        // pulls every snapshot row for (app, country) into memory →
+        // trivial DoS surface. 200 matches the existing search/refresh
+        // cap (`RefreshService.searchLimit`) so the project has one
+        // pagination ceiling across endpoints. Lower bound of 1 stops
+        // a `?limit=-1` from inverting the SQL LIMIT semantics.
+        let limit = max(1, min(requested, Self.historyLimitCap))
         return try await req.appMetadataSnapshotService().history(
             watchedAppID: appID, country: country, limit: limit
         )
     }
+
+    /// Inclusive upper bound on `/metadata/history?limit=`. Mirrors
+    /// `RefreshService.searchLimit` so the API has one ceiling for
+    /// "newest-first paginated history" responses.
+    static let historyLimitCap = 200
 
     @Sendable func refresh(req: Request) async throws -> AppMetadataSnapshot {
         let appID = try Self.appID(from: req)
@@ -219,13 +231,19 @@ struct MetadataController: RouteCollection {
     }
 
     /// Parse a comma-separated list of UUIDs from a query param.
-    /// Silently drops malformed ids — the typical case is a SPA bug or
-    /// hand-crafted URL; we'd rather return a partial result than 400
-    /// the whole request.
+    /// Silently drops malformed ids and de-duplicates while preserving
+    /// first-seen order. Without dedup, `?competitors=X,X` would render
+    /// X twice in the diff table; with it, repeated ids collapse to a
+    /// single column. We pick first-seen order over set-order so the
+    /// query param's ordering still controls the column layout.
     private static func uuidList(_ value: String?) -> [UUID] {
         guard let value, !value.isEmpty else { return [] }
-        return value
-            .split(separator: ",")
-            .compactMap { UUID(uuidString: $0.trimmingCharacters(in: .whitespaces)) }
+        var seen: Set<UUID> = []
+        var out: [UUID] = []
+        for chunk in value.split(separator: ",") {
+            guard let id = UUID(uuidString: chunk.trimmingCharacters(in: .whitespaces)) else { continue }
+            if seen.insert(id).inserted { out.append(id) }
+        }
+        return out
     }
 }

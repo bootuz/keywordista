@@ -1,4 +1,5 @@
 import Crypto
+import Fluent
 import Foundation
 import Vapor
 
@@ -48,21 +49,16 @@ struct AppMetadataSnapshotService: AppMetadataSnapshotServiceProtocol {
 
         // Fetch both data sources concurrently. The HTML scrape and the
         // iTunes lookup are independent network calls; running them in
-        // parallel halves the wall-clock cost. Failures on either side
-        // are non-fatal — see the carry-forward logic below.
+        // parallel halves the wall-clock cost.
         async let richTask = lookupClient.lookupRich(appStoreId: app.appStoreId, country: normalizedCountry)
         async let scrapeTask = scraper.scrapeSubtitle(appStoreId: app.appStoreId, country: normalizedCountry)
 
-        let rich: RichLookupResultApp
-        do {
-            rich = try await richTask
-        } catch {
-            // iTunes lookup failure is fatal for this run — without the
-            // lookup data we have no snapshot to dedupe against. Cancel
-            // the scrape (waste of bandwidth) and surface.
-            _ = try? await scrapeTask
-            throw error
-        }
+        // iTunes failure is fatal — without the lookup we have no
+        // snapshot to dedupe against. The async-let scrapeTask is
+        // implicitly cancelled when this function throws (Swift
+        // structured concurrency); explicitly awaiting it here would
+        // defeat that, which was the previous bug.
+        let rich = try await richTask
 
         let scrapeOutcome: ScrapeOutcome
         do {
@@ -71,57 +67,72 @@ struct AppMetadataSnapshotService: AppMetadataSnapshotServiceProtocol {
             scrapeOutcome = .failed(reason: String(describing: error))
         }
 
-        let latest = try await snapshots.latest(watchedAppID: watchedAppID, country: normalizedCountry)
+        // Read-modify-write inside a single transaction so two
+        // concurrent snapshot() callers can't both observe `latest ==
+        // nil` and double-insert. SQLite's `BEGIN IMMEDIATE` (which
+        // Fluent uses) serializes write transactions across
+        // connections, so the second caller observes the first's row
+        // and falls into the bump path.
+        return try await snapshots.withTransaction { tx in
+            let priorLatest = try await tx.latest(
+                watchedAppID: watchedAppID,
+                country: normalizedCountry
+            )
 
-        // Carry-forward on scrape failure: reuse the previous row's
-        // subtitle so a transient HTML blip doesn't churn the timeline.
-        // The content hash sees the carried-forward value, so dedupe
-        // continues to behave correctly when the next successful scrape
-        // matches the carried value.
-        let resolvedSubtitle: String?
-        let scrapeFailedAt: Date?
-        switch scrapeOutcome {
-        case .succeeded(let subtitle):
-            resolvedSubtitle = subtitle
-            scrapeFailedAt = nil
-        case .failed(let reason):
-            logger.warning("html scrape failed for app=\(watchedAppID) country=\(normalizedCountry): \(reason); carrying forward prior subtitle")
-            resolvedSubtitle = latest?.subtitle
-            scrapeFailedAt = now
+            // Carry-forward on scrape failure: reuse the previous row's
+            // subtitle so a transient HTML blip doesn't churn the
+            // timeline. Hashing the carried value means the next
+            // successful scrape that returns the same subtitle dedupes
+            // cleanly.
+            //
+            // `scrapeFailedAt` is set ONLY on this newly-constructed
+            // row. It is never propagated to the bump path — the
+            // historical row's provenance must stay accurate. If the
+            // bump path activates, the prior row's `scrapeFailedAt`
+            // stays whatever it was at *that* row's creation time.
+            let resolvedSubtitle: String?
+            let scrapeFailedAt: Date?
+            switch scrapeOutcome {
+            case .succeeded(let subtitle):
+                resolvedSubtitle = subtitle
+                scrapeFailedAt = nil
+            case .failed(let reason):
+                self.logger.warning("html scrape failed for app=\(watchedAppID) country=\(normalizedCountry): \(reason); carrying forward prior subtitle")
+                resolvedSubtitle = priorLatest?.subtitle
+                scrapeFailedAt = now
+            }
+
+            let candidate = Self.makeSnapshot(
+                watchedAppID: watchedAppID,
+                country: normalizedCountry,
+                rich: rich,
+                subtitle: resolvedSubtitle,
+                // promotionalText + IAPs are NULL in v1 (scaffolded for
+                // the phase-2 AMP fetch path).
+                promotionalText: priorLatest?.promotionalText,
+                inAppPurchasesJSON: priorLatest?.inAppPurchasesJSON,
+                scrapeFailedAt: scrapeFailedAt,
+                now: now
+            )
+            let hash = Self.contentHash(candidate)
+            candidate.contentHash = hash
+
+            if let priorLatest, priorLatest.contentHash == hash, let priorID = priorLatest.id {
+                // Dedupe path — bump `lastSeenAt` only. The prior row's
+                // `scrapeFailedAt` is intentionally left untouched.
+                try await tx.bumpLastSeenAt(id: priorID, lastSeenAt: now)
+                return try await tx.latest(
+                    watchedAppID: watchedAppID,
+                    country: normalizedCountry
+                ) ?? priorLatest
+            }
+
+            candidate.firstSeenAt = now
+            candidate.lastSeenAt = now
+            candidate.fetchedAt = now
+            try await tx.save(candidate)
+            return candidate
         }
-
-        let snapshot = Self.makeSnapshot(
-            watchedAppID: watchedAppID,
-            country: normalizedCountry,
-            rich: rich,
-            subtitle: resolvedSubtitle,
-            // promotionalText + IAPs are NULL in v1 (scaffolded for the
-            // phase-2 AMP fetch path).
-            promotionalText: latest?.promotionalText,
-            inAppPurchasesJSON: latest?.inAppPurchasesJSON,
-            scrapeFailedAt: scrapeFailedAt,
-            now: now
-        )
-
-        let hash = Self.contentHash(snapshot)
-        snapshot.contentHash = hash
-
-        if let latest, latest.contentHash == hash, let latestID = latest.id {
-            // Dedupe path. Bump `lastSeenAt`; record the scrape failure
-            // marker on the surviving row so the change-derivation logic
-            // can skip rows whose subtitle was carried forward.
-            try await snapshots.bumpLastSeenAt(id: latestID, lastSeenAt: now, scrapeFailedAt: scrapeFailedAt)
-            // Reload to return the up-to-date row (avoids the caller
-            // seeing stale `lastSeenAt`).
-            return try await snapshots.latest(watchedAppID: watchedAppID, country: normalizedCountry) ?? latest
-        }
-
-        // New row.
-        snapshot.firstSeenAt = now
-        snapshot.lastSeenAt = now
-        snapshot.fetchedAt = now
-        try await snapshots.save(snapshot)
-        return snapshot
     }
 
     func latest(watchedAppID: UUID, country: String) async throws -> AppMetadataSnapshot? {

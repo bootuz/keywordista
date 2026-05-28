@@ -77,8 +77,9 @@ final class AppMetadataSnapshot: Model, Content, @unchecked Sendable {
     init() {}
 
     // No convenience initializer here — `AppMetadataSnapshotService` builds
-    // these from a `RichLookupResultApp` + scraper output via the
-    // `populate(from:)` helper to keep the field mapping in one place.
+    // these from a `RichLookupResultApp` + scraper output via its static
+    // `makeSnapshot(watchedAppID:country:rich:subtitle:...)` factory, so
+    // the field-by-field mapping lives in one place.
 }
 
 struct CreateAppMetadataSnapshot: AsyncMigration {

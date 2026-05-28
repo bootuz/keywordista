@@ -75,6 +75,25 @@ struct AppStoreHTMLScraperTests {
         )
     }
 
+    @Test("double-encoded entities decode exactly once (no over-decode)")
+    func doubleEncodedEntitiesDecodeOnce() {
+        // The input encodes the literal string `&quot;mindful&quot;` —
+        // i.e. the user/system meant to ship `&quot;mindful&quot;` to
+        // the page as visible text, and the page double-encoded the
+        // ampersands as `&amp;quot;` so the browser would render
+        // `&quot;mindful&quot;` literally.
+        //
+        // Decoding `&amp;` LAST means we strip the first level and
+        // stop. Decoding `&amp;` FIRST would over-decode to `"mindful"`,
+        // silently changing what the page intended to display.
+        let html = #"<p class="subtitle">a &amp;quot;mindful&amp;quot; b</p>"#
+        #expect(
+            AppStoreHTMLScraper.extractSubtitle(from: html)
+                == #"a &quot;mindful&quot; b"#,
+            "decode &amp; LAST — otherwise &amp;quot; over-decodes to \""
+        )
+    }
+
     @Test("returns nil for an empty subtitle element")
     func emptyElementIsNil() {
         let html = #"<p class="subtitle"></p>"#

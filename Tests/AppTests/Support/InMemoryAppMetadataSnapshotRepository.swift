@@ -7,7 +7,7 @@ import Foundation
 /// appended to `saved`).
 actor InMemoryAppMetadataSnapshotRepository: AppMetadataSnapshotRepositoryProtocol {
     private(set) var saved: [AppMetadataSnapshot] = []
-    private(set) var bumps: [(id: UUID, lastSeenAt: Date, scrapeFailedAt: Date?)] = []
+    private(set) var bumps: [(id: UUID, lastSeenAt: Date)] = []
 
     init() {}
 
@@ -17,11 +17,13 @@ actor InMemoryAppMetadataSnapshotRepository: AppMetadataSnapshotRepositoryProtoc
         saved.append(snapshot)
     }
 
-    func bumpLastSeenAt(id: UUID, lastSeenAt: Date, scrapeFailedAt: Date?) async throws {
-        bumps.append((id, lastSeenAt, scrapeFailedAt))
+    func bumpLastSeenAt(id: UUID, lastSeenAt: Date) async throws {
+        bumps.append((id, lastSeenAt))
         if let i = saved.firstIndex(where: { $0.id == id }) {
             saved[i].lastSeenAt = lastSeenAt
-            saved[i].scrapeFailedAt = scrapeFailedAt
+            // Intentionally do NOT touch scrapeFailedAt — preserving the
+            // row's original provenance flag is the whole point of the
+            // protocol contract change.
         }
     }
 
@@ -49,6 +51,23 @@ actor InMemoryAppMetadataSnapshotRepository: AppMetadataSnapshotRepositoryProtoc
                 .sorted(by: { $0.lastSeenAt > $1.lastSeenAt })
                 .prefix(limit)
         )
+    }
+
+    func snapshottedCountries(watchedAppID: UUID) async throws -> [String] {
+        Array(Set(saved.filter { $0.$watchedApp.id == watchedAppID }.map(\.countryCode))).sorted()
+    }
+
+    nonisolated func withTransaction<T: Sendable>(
+        _ body: @Sendable @escaping (any AppMetadataSnapshotRepositoryProtocol) async throws -> T
+    ) async throws -> T {
+        // Actor isolation already serializes writers in the in-memory
+        // fake; "transactions" collapse to a direct passthrough. We
+        // can't capture `self` strongly here without crossing actor
+        // boundaries inside the closure, so we mark this nonisolated
+        // and rely on the body's own async access to re-enter the
+        // actor as needed. The body must access this repo via the
+        // parameter, not via captured `self`.
+        try await body(self)
     }
 }
 

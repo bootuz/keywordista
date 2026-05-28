@@ -35,19 +35,36 @@ struct DailyMetadataSnapshotJob: AsyncScheduledJob {
         let db = app.db
 
         let allApps = try await WatchedApp.query(on: db).all()
+
+        // Hoist the keyword-country set ONCE. The previous shape called
+        // `Keyword.query.all()` inside `countries(for:)` on every
+        // competitor iteration — an N+1 against a table that never
+        // changes mid-pass. Hoisting collapses N queries to 1 with no
+        // semantic change.
+        let keywordCountries = Set(
+            try await Keyword.query(on: db).all().map { $0.countryCode.lowercased() }
+        )
+
         var totalSnapshots = 0
         var totalFailures = 0
 
         for watched in allApps {
             guard let appID = watched.id else { continue }
-            let countries = try await Self.countries(for: watched, on: db)
+            let snapshotsService = service
+            let countries = try await Self.countries(
+                for: watched,
+                appID: appID,
+                on: db,
+                keywordCountries: keywordCountries,
+                snapshotsService: snapshotsService
+            )
             if countries.isEmpty {
                 logger.debug("DailyMetadataSnapshot: app=\(appID) has no storefronts to refresh; skipping")
                 continue
             }
             for country in countries {
                 do {
-                    _ = try await service.snapshot(watchedAppID: appID, country: country)
+                    _ = try await snapshotsService.snapshot(watchedAppID: appID, country: country)
                     totalSnapshots += 1
                 } catch {
                     // Fail-soft per (app, country). One bad lookup
@@ -64,12 +81,25 @@ struct DailyMetadataSnapshotJob: AsyncScheduledJob {
         )
     }
 
-    /// Decide which storefronts to refresh for a given app. Own apps get
-    /// the full availability set; competitors get the storefronts where
-    /// the user has tracked keywords (so the compare page has data for
-    /// the places the user actually looks).
-    private static func countries(for app: WatchedApp, on db: any Database) async throws -> [String] {
-        guard let appID = app.id else { return [] }
+    /// Decide which storefronts to refresh for a given app.
+    ///
+    /// Own apps get the full availability set.
+    ///
+    /// Competitors get the UNION of:
+    ///   • storefronts where any keyword exists (the user's tracked
+    ///     coverage)
+    ///   • storefronts ALREADY snapshotted for this competitor (so the
+    ///     add-time `lookupCountry` keeps getting refreshed even when no
+    ///     keyword exists in it — otherwise that snapshot ages forever).
+    /// Fallback to "us" when both sets are empty (newly-added competitor
+    /// with no keywords anywhere).
+    private static func countries(
+        for app: WatchedApp,
+        appID: UUID,
+        on db: any Database,
+        keywordCountries: Set<String>,
+        snapshotsService: any AppMetadataSnapshotServiceProtocol
+    ) async throws -> [String] {
         switch app.typedKind {
         case .own:
             let avail = try await AppStorefrontAvailability.query(on: db)
@@ -83,13 +113,16 @@ struct DailyMetadataSnapshotJob: AsyncScheduledJob {
             return avail.map { $0.country }
 
         case .competitor:
-            // Storefronts where any keyword exists. This naturally
-            // tracks the user's coverage: they only see compare data
-            // for places they care to rank in.
-            let keywords = try await Keyword.query(on: db).all()
-            let countrySet = Set(keywords.map { $0.countryCode })
-            if countrySet.isEmpty { return ["us"] }
-            return Array(countrySet).sorted()
+            // Already-snapshotted countries — these include whichever
+            // `lookupCountry` the user added the competitor with, plus
+            // any countries lazy-backfilled by `/compare` after the
+            // user explored other storefronts. Keeping them in the
+            // refresh set means none of them go stale.
+            let existing = try await snapshotsService.latestPerCountry(watchedAppID: appID)
+            let snapshotted = Set(existing.keys.map { $0.lowercased() })
+            let combined = keywordCountries.union(snapshotted)
+            if combined.isEmpty { return ["us"] }
+            return Array(combined).sorted()
         }
     }
 }

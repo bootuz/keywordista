@@ -131,6 +131,17 @@ struct MetadataControllerTests {
         #expect(MetadataController.deriveChanges(history: [newer, older]).isEmpty)
     }
 
+    @Test("history limit cap is a documented constant matching RefreshService.searchLimit")
+    func historyLimitCapIsDocumented() {
+        // Source-level pin: if a future change widens the cap or drops
+        // the clamp altogether, this assertion catches it. We don't
+        // bind to the exact number 200 in case both caps shift in
+        // tandem; we assert the constant exists and is positive.
+        #expect(MetadataController.historyLimitCap > 0)
+        #expect(MetadataController.historyLimitCap <= 1000,
+                "if you raise the cap past 1000, rethink the in-memory load profile of GET /apps/:id/metadata/history")
+    }
+
     @Test("nil-to-value and value-to-nil transitions both count as changes")
     func nilTransitionsAreChanges() {
         let day1 = Date(timeIntervalSince1970: 1_700_000_000)

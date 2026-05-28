@@ -190,9 +190,11 @@ struct AppMetadataSnapshotServiceTests {
         // insert. Dedupe kept the timeline clean.
         #expect(saved.count == 1, "carry-forward should dedupe; no insert on scrape failure")
         #expect(bumps.count == 1)
-        // The bump also records `scrapeFailedAt` for debug visibility,
-        // even though no new row was inserted.
-        #expect(bumps.first?.scrapeFailedAt != nil)
+        // The bump path INTENTIONALLY does not touch `scrapeFailedAt` —
+        // the prior row's provenance (it was a clean observation when
+        // inserted) must stay accurate. The day-2 scrape failure is
+        // logged but not recorded on the historical row.
+        #expect(saved.first?.scrapeFailedAt == nil, "bump path must not clobber a clean prior row's scrapeFailedAt")
         // And the surviving row's subtitle still reads "A" (the original).
         #expect(saved.first?.subtitle == "A")
     }
@@ -220,9 +222,43 @@ struct AppMetadataSnapshotServiceTests {
         let bumps = await snapshots.bumps
         #expect(saved.count == 1, "scrape blip+recovery should not churn the timeline")
         #expect(bumps.count == 2)
-        // After recovery, the latest bump's scrapeFailedAt should be
-        // nil — the row is back to a fully successful observation.
-        #expect(bumps.last?.scrapeFailedAt == nil)
+        // The original row was a successful observation on day 1
+        // (`scrapeFailedAt == nil`), and the bump path never touches
+        // that flag — so it stays nil through day 2's blip and day 3's
+        // recovery. (This is the fix for the carry-forward bump
+        // clobber bug surfaced in code review.)
+        #expect(saved.first?.scrapeFailedAt == nil)
+    }
+
+    @Test("bump never clobbers a clean prior row's scrapeFailedAt (provenance preservation)")
+    func bumpDoesNotClobberPriorRowProvenance() async throws {
+        // Day 1: scrape succeeded → row has scrapeFailedAt == nil
+        //        (the row is a real, clean observation).
+        // Day 2: scrape fails → carry-forward subtitle, content hash
+        //        matches, dedupe-bump path fires.
+        //
+        // The historical day-1 row must remain provenance-clean
+        // (scrapeFailedAt stays nil). If the bump clobbers it with the
+        // day-2 failure timestamp, the change-derivation logic later
+        // mistakes a previously-clean row for a carry-forward row and
+        // drops real changes from /compare's timeline. This is the
+        // exact bug the ultrareview agent caught — pinning it here.
+        let (service, snapshots, _, clock) = await Self.makeService(
+            scrapeOutcomes: [
+                .succeeded(subtitle: "Mindfulness"),
+                .failed(reason: "transient 502"),
+            ]
+        )
+        _ = try await service.snapshot(watchedAppID: Self.appID, country: "us")
+        clock.now = clock.now.addingTimeInterval(86400)
+        _ = try await service.snapshot(watchedAppID: Self.appID, country: "us")
+
+        let saved = await snapshots.saved
+        #expect(saved.count == 1)
+        #expect(
+            saved.first?.scrapeFailedAt == nil,
+            "bump must preserve the day-1 row's clean scrapeFailedAt — clobbering it would corrupt provenance and silently hide real changes from the timeline"
+        )
     }
 
     @Test("real subtitle change after a failure is recorded as a real change")
