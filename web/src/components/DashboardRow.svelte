@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { DashboardRow as Row } from '../lib/types';
-  import { refreshKeyword, deleteKeyword } from '../lib/api';
-  import { refreshing, markRefreshing, clearRefreshing, ensurePolling } from '../lib/stores';
+  import { refreshKeyword, deleteKeyword, addCompetitor, listCompetitors } from '../lib/api';
+  import { refreshing, markRefreshing, clearRefreshing, ensurePolling, competitors } from '../lib/stores';
   import { timeAgo } from '../lib/time';
   import AppIcon from './AppIcon.svelte';
   import CountryFlag from './CountryFlag.svelte';
@@ -17,6 +17,43 @@
   let { row, onChanged, onOpenHistory }: Props = $props();
 
   const isRefreshing = $derived($refreshing.has(row.keywordId));
+
+  // Track which top-result app store ids are already tracked (so the
+  // "+ track" button can disable itself for already-added apps). We
+  // check the local `competitors` store rather than re-fetching per
+  // hover. The store is populated by ComparePage; if the dashboard
+  // is the first thing the user opens we accept a one-tick window
+  // where the button shows "add" even for already-tracked apps —
+  // the POST itself will then 409 on the uniqueness constraint.
+  function isAlreadyTrackedAsCompetitor(appStoreId: number): boolean {
+    return $competitors.some((c) => c.appStoreId === appStoreId);
+  }
+
+  let adding: Set<number> = $state(new Set());
+  async function addAsCompetitor(appStoreId: number, country: string): Promise<void> {
+    if (adding.has(appStoreId)) return;
+    const next = new Set(adding);
+    next.add(appStoreId);
+    adding = next;
+    try {
+      await addCompetitor(appStoreId, country);
+      // Refresh the competitors store so the button updates without
+      // a page reload. Failure is non-fatal — the add still succeeded
+      // server-side; the UI just won't reflect it until next reload.
+      try {
+        const list = await listCompetitors();
+        competitors.set(list);
+      } catch {
+        // ignore
+      }
+    } catch (e) {
+      alert(`Could not add competitor: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      const after = new Set(adding);
+      after.delete(appStoreId);
+      adding = after;
+    }
+  }
 
   function rankLabel(r: number | null): string {
     return r == null ? '—' : `#${r}`;
@@ -76,14 +113,35 @@
   <td class="px-3 py-2">
     <div class="flex items-center gap-1">
       {#each row.topResults as r}
-        <a
-          href="https://apps.apple.com/{row.countryCode}/app/id{r.appStoreId}"
-          target="_blank"
-          rel="noopener noreferrer"
-          title={r.name}
-        >
-          <AppIcon src={r.iconURL} alt={r.name} size={24} />
-        </a>
+        {@const tracked = isAlreadyTrackedAsCompetitor(r.appStoreId)}
+        {@const isAdding = adding.has(r.appStoreId)}
+        <span class="relative group">
+          <a
+            href="https://apps.apple.com/{row.countryCode}/app/id{r.appStoreId}"
+            target="_blank"
+            rel="noopener noreferrer"
+            title={r.name}
+          >
+            <AppIcon src={r.iconURL} alt={r.name} size={24} />
+          </a>
+          <!-- Hover-revealed "+ track as competitor" button. Hidden by
+               default to keep the dashboard's existing density; appears
+               on hover via group-hover. Disabled when already tracked
+               or while the add request is in flight. -->
+          <button
+            type="button"
+            onclick={() => void addAsCompetitor(r.appStoreId, row.countryCode)}
+            disabled={tracked || isAdding}
+            title={tracked ? 'Already tracked as a competitor' : 'Track this app as a competitor'}
+            class="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center
+                   h-4 w-4 rounded-full text-[10px] leading-none font-bold
+                   bg-zinc-900 text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900
+                   disabled:bg-zinc-300 dark:disabled:bg-zinc-700 disabled:cursor-not-allowed"
+            aria-label="Track {r.name} as a competitor"
+          >
+            {tracked ? '✓' : isAdding ? '…' : '+'}
+          </button>
+        </span>
       {/each}
     </div>
   </td>

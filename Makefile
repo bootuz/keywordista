@@ -13,7 +13,7 @@ help:
 	@echo "  make build         — swift build"
 	@echo "  make run           — single-command launch: build web + swift run"
 	@echo "  make mac-app       — build Keywordista.app (server + SPA + menubar shell)"
-	@echo "  make open-mac-app  — mac-app + open the resulting .app"
+	@echo "  make open-mac-app  — mac-app + (re)launch the .app (kills any running instance first)"
 	@echo "  make dmg           — build a signed + notarized DMG (releases/)"
 	@echo "  make dmg-unsigned  — build an unsigned DMG (skips signing + notarizing)"
 	@echo "  make docker-build  — build the server Docker image as keywordista:dev"
@@ -53,6 +53,14 @@ mac-app:
 	cd mac && ./build-app.sh debug
 
 open-mac-app: mac-app
+	# `open` on macOS is "launch OR bring-to-front" — if an instance is
+	# already running, a freshly-built binary silently won't take effect.
+	# Force a relaunch by killing first. Leading `-` tolerates the
+	# clean-tree case where pkill exits 1 because no process matched.
+	# The sleep gives macOS a beat to release the menubar icon + the
+	# spawned server's port before the new instance claims them.
+	-pkill -x Keywordista 2>/dev/null
+	-sleep 1
 	open mac/Keywordista.app
 
 # Build a release DMG: universal binaries, Developer ID signed, notarized,

@@ -1,11 +1,54 @@
 import { writable, get } from 'svelte/store';
-import type { DashboardRow, WatchedApp, DeveloperKeywordsResponse } from './types';
+import type { DashboardRow, WatchedApp, DeveloperKeywordsResponse, AppMetadataSnapshot } from './types';
 import { getDashboard, getRefreshStatus, getDeveloperKeywords } from './api';
 
 // Shared UI state. Each store has a single owner (the component that calls
 // the matching `set` after an API call); other components subscribe read-only.
 export const dashboard = writable<DashboardRow[]>([]);
 export const apps = writable<WatchedApp[]>([]);
+
+// ── Competitor analysis (v2) ────────────────────────────────────────────
+//
+// Competitors are the apps the user added via /competitors/* — the same
+// shape as `apps` above, just filtered to `kind === 'competitor'`. Stored
+// in its own writable so the ComparePage doesn't have to filter on every
+// render, and the DashboardRow's "+ track as competitor" button can
+// re-fetch without disturbing the dashboard's `apps` store.
+export const competitors = writable<WatchedApp[]>([]);
+
+// Cache of latest metadata snapshots keyed by `${appId}::${country}`.
+// Populated lazily — first reads pay the network cost; subsequent reads
+// hit the cache. Cleared on manual refresh. NOT polled by `reconcile()` —
+// metadata changes daily at most, so opportunistic refresh is enough.
+export const metadataCache = writable<Map<string, AppMetadataSnapshot>>(new Map());
+
+export function metadataCacheKey(appId: string, country: string): string {
+  return `${appId}::${country.toLowerCase()}`;
+}
+
+export function setMetadataCache(appId: string, country: string, snapshot: AppMetadataSnapshot): void {
+  metadataCache.update((m) => {
+    const next = new Map(m);
+    next.set(metadataCacheKey(appId, country), snapshot);
+    return next;
+  });
+}
+
+export function clearMetadataCache(appId?: string, country?: string): void {
+  metadataCache.update((m) => {
+    if (!appId) return new Map();
+    const next = new Map(m);
+    if (country) {
+      next.delete(metadataCacheKey(appId, country));
+    } else {
+      // Clear all entries for this app across every country.
+      for (const k of Array.from(next.keys())) {
+        if (k.startsWith(`${appId}::`)) next.delete(k);
+      }
+    }
+    return next;
+  });
+}
 
 // ── Refreshing state ────────────────────────────────────────────────────
 //

@@ -15,14 +15,61 @@ actor StubSearchClient: ITunesSearchClientProtocol {
 
 actor StubLookupClient: ITunesLookupClientProtocol {
     private let canned: LookupResultApp
+    // Optional rich projection — set explicitly for tests that exercise
+    // the snapshot pipeline. Defaults to a minimal projection of the
+    // thin `canned` so older tests don't have to construct it.
+    private var cannedRich: RichLookupResultApp?
     private(set) var calls: [(appStoreId: Int64, country: String)] = []
+    private(set) var richCalls: [(appStoreId: Int64, country: String)] = []
 
-    init(canned: LookupResultApp) { self.canned = canned }
+    init(canned: LookupResultApp, cannedRich: RichLookupResultApp? = nil) {
+        self.canned = canned
+        self.cannedRich = cannedRich
+    }
 
     func lookup(appStoreId: Int64, country: String) async throws -> LookupResultApp {
         calls.append((appStoreId, country))
         return canned
     }
+
+    func lookupRich(appStoreId: Int64, country: String) async throws -> RichLookupResultApp {
+        richCalls.append((appStoreId, country))
+        // Default rich projection: lift the thin `canned` into the rich
+        // shape. Tests that need richer fields (description, subtitle-
+        // adjacent ASO copy, ratings) override via the initializer.
+        if let r = cannedRich { return r }
+        return RichLookupResultApp(
+            trackId: canned.trackId,
+            bundleId: canned.bundleId,
+            trackName: canned.trackName,
+            version: nil,
+            currentVersionReleaseDate: nil,
+            releaseNotes: nil,
+            releaseDate: nil,
+            description: nil,
+            sellerName: nil,
+            primaryGenreName: nil,
+            primaryGenreId: canned.primaryGenreId,
+            genres: nil,
+            artworkUrl100: canned.artworkUrl100,
+            artworkUrl512: nil,
+            screenshotUrls: nil,
+            ipadScreenshotUrls: nil,
+            price: nil,
+            currency: nil,
+            formattedPrice: nil,
+            averageUserRating: nil,
+            userRatingCount: nil,
+            averageUserRatingForCurrentVersion: nil,
+            userRatingCountForCurrentVersion: nil,
+            contentAdvisoryRating: nil,
+            languageCodesISO2A: nil,
+            fileSizeBytes: nil,
+            minimumOsVersion: nil
+        )
+    }
+
+    func setCannedRich(_ rich: RichLookupResultApp) { cannedRich = rich }
 }
 
 actor RecordingDispatcher: RefreshDispatcherProtocol {

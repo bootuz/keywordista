@@ -301,6 +301,19 @@
           </button>
         {/if}
         <!--
+          Compare page (v2): side-by-side metadata diff against tracked
+          competitors. Uses the hash-router link convention so the SPA
+          handles navigation client-side without a server round-trip.
+        -->
+        <a
+          href="#/compare"
+          title="Open the compare page"
+          aria-label="Open the compare page"
+          class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        >
+          Compare
+        </a>
+        <!--
           External link to the source repo. Sits next to the Settings
           button in the header's "meta actions" cluster. Uses an <a>
           rather than a <button> because it's pure navigation to an

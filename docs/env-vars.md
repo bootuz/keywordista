@@ -308,6 +308,19 @@ In-process queue workers. Capped at 1 by design (iTunes API throttling
 + SQLite write-lock contention). Future-proofed as a knob in case
 Apple ever lifts the throttling.
 
+### `KEYWORDISTA_METADATA_SNAPSHOT_ENABLED`
+
+- **Type:** bool (`true`/`false`)
+- **Default:** `true`
+- **Since:** 2.0
+
+Kill switch for the daily competitor-analysis metadata snapshot job
+(03:30 UTC). Set to `false` to skip the daily refresh entirely; manual
+`POST /api/v1/apps/:id/metadata/refresh` and the at-add snapshot still
+work regardless. Off-switch use case: Docker users who only care about
+keyword tracking and want to skip the extra daily iTunes traffic from
+the snapshot pipeline.
+
 ### `KEYWORDISTA_HEALTHCHECK_PATH`
 
 - **Type:** path starting with `/`
