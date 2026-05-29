@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { competitorGaps } from "../src/tools/reads.js";
+import { competitorGaps, metadataLint } from "../src/tools/reads.js";
 import type { ApiClient } from "../src/client.js";
 
 function fakeClient(rows: unknown): ApiClient {
@@ -50,5 +50,35 @@ describe("competitorGaps", () => {
 
     const ahead = out.rows[2];
     expect(ahead.competitorRank).toBeNull(); // omitted → normalized to null
+  });
+});
+
+function fakeLintClient(rows: unknown): ApiClient {
+  return {
+    resolution: async () => ({ baseURL: "http://fake", source: "env" }),
+    get: async (path: string) => {
+      if (path.endsWith("/metadata/lint")) return rows;
+      throw new Error(`unexpected GET ${path}`);
+    },
+    post: async () => ({}) as unknown,
+    del: async () => {},
+  };
+}
+
+describe("metadataLint", () => {
+  it("parses findings and counts warnings", async () => {
+    const raw = [
+      { rule: "duplicateWord", severity: "warning", field: "title+subtitle", message: "x" },
+      { rule: "wastedBudget", severity: "info", field: "title", message: "y" },
+      { rule: "untrackedWord", severity: "info", field: "title+subtitle", message: "z" },
+    ];
+    const out = await metadataLint(fakeLintClient(raw), { appId: APP });
+    expect(out.count).toBe(3);
+    expect(out.warningCount).toBe(1);
+    expect(out.findings.map((f) => f.rule)).toEqual([
+      "duplicateWord",
+      "wastedBudget",
+      "untrackedWord",
+    ]);
   });
 });
