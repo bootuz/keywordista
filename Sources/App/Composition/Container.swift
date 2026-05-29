@@ -32,6 +32,15 @@ extension Request {
         )
     }
 
+    func competitorGapService() -> any CompetitorGapServiceProtocol {
+        CompetitorGapService(
+            keywordRepository: FluentKeywordRepository(db: db),
+            watchedAppRepository: FluentWatchedAppRepository(db: db),
+            rankCheckRepository: FluentRankCheckRepository(db: db),
+            classifier: DefaultGapClassifier()
+        )
+    }
+
     func settingsService() -> any SettingsServiceProtocol {
         // requireSecretBox fatalErrors if configure.swift didn't set
         // it — by the time a request reaches here, that's an invariant.
