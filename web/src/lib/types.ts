@@ -160,6 +160,28 @@ export interface AppKeywordRow {
   checkedAt: string | null;
 }
 
+// How my app stands vs a competitor on a keyword. `score` drives the
+// "most urgent first" sort — higher = act on it sooner. Mirrors the
+// server's GapVerdict (Sources/App/Domain/DomainTypes.swift).
+export interface GapVerdict {
+  kind: 'behind' | 'ahead' | 'pureGap' | 'neither' | 'tied';
+  score: number;
+}
+
+// One cell of the competitor gap matrix: my rank vs a single competitor's
+// on a single tracked keyword. `myRank`/`competitorRank` are null when the
+// app is outside the top 200 for that keyword.
+export interface CompetitorGapRow {
+  keywordId: string;
+  term: string;
+  countryCode: string;
+  competitorAppId: string;
+  competitorName: string;
+  myRank: number | null;
+  competitorRank: number | null;
+  verdict: GapVerdict;
+}
+
 // Settings DTOs — what the API returns. Secrets never come back; the server
 // only tells us whether they're present.
 export interface ASCStatus {

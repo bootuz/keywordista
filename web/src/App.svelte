@@ -21,6 +21,7 @@
   // runes) — `router.location` replaces the legacy `location` store.
   import Router, { router, push } from 'svelte-spa-router';
   import { routes, ROUTES } from './lib/router';
+  import Sidebar from './components/Sidebar.svelte';
   import {
     authState,
     hydrateAuthState,
@@ -130,6 +131,16 @@
 
     return null;
   }
+
+  // Auth routes render bare (no app shell) — a signed-out user must never
+  // see product navigation. Everything else gets the persistent sidebar.
+  function isAuthRoute(path: string): boolean {
+    return (
+      path === ROUTES.login
+      || path === ROUTES.bootstrap
+      || path.startsWith('/invite/')
+    );
+  }
 </script>
 
 {#if !hydrated}
@@ -149,6 +160,13 @@
       </p>
     </div>
   </div>
-{:else}
+{:else if isAuthRoute(router.location)}
   <Router {routes} />
+{:else}
+  <div class="flex min-h-screen bg-white dark:bg-zinc-950">
+    <Sidebar />
+    <main class="min-w-0 flex-1">
+      <Router {routes} />
+    </main>
+  </div>
 {/if}

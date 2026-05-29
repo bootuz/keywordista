@@ -21,6 +21,8 @@ import BootstrapInstructions from '../components/BootstrapInstructions.svelte';
 import InviteAcceptPage from '../components/InviteAcceptPage.svelte';
 import UsersAdmin from '../components/UsersAdmin.svelte';
 import ComparePage from '../components/ComparePage.svelte';
+import GapsPage from '../components/GapsPage.svelte';
+import ChartsPage from '../components/ChartsPage.svelte';
 import NotFoundPage from '../components/NotFoundPage.svelte';
 
 // Routes are wildcards-last per svelte-spa-router conventions —
@@ -41,6 +43,8 @@ export const routes: RouteDefinition = {
   '/invite/:token': InviteAcceptPage,
   '/settings/users': UsersAdmin,
   '/compare': ComparePage,
+  '/gaps': GapsPage,
+  '/charts': ChartsPage,
   // Wildcard last — anything unmatched lands on the 404 page.
   '*': NotFoundPage,
 };
@@ -55,4 +59,6 @@ export const ROUTES = {
   invite: (token: string) => `/invite/${token}`,
   usersAdmin: '/settings/users',
   compare: '/compare',
+  gaps: '/gaps',
+  charts: '/charts',
 } as const;

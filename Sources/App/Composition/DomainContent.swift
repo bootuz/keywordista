@@ -7,6 +7,7 @@ extension DashboardRow: Content {}
 extension TopResultDTO: Content {}
 extension HistoryPoint: Content {}
 extension AppKeywordRow: Content {}
+extension CompetitorGapRow: Content {}
 extension ASCStatus: Content {}
 extension ASAStatus: Content {}
 extension QueueStatus: Content {}

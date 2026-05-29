@@ -163,3 +163,32 @@ struct AppKeywordRow: Codable, Sendable, Equatable {
     let entryBarrier: Int
     let checkedAt: Date?
 }
+
+// One cell of the competitor gap matrix: how my app stands against a single
+// competitor on a single tracked keyword. The SPA renders the full
+// (keyword × competitor) grid and lets the user sort/filter it.
+struct CompetitorGapRow: Codable, Sendable, Equatable {
+    let keywordId: UUID
+    let term: String
+    let countryCode: String
+    let competitorAppId: UUID
+    let competitorName: String
+    let myRank: Int?          // my app's latest rank (nil = outside top 200)
+    let competitorRank: Int?  // competitor's latest rank (nil = outside top 200)
+    let verdict: GapVerdict
+}
+
+// How my app stands vs a competitor on a keyword. `score` drives the
+// "most urgent first" sort in the gap view — higher = act on it sooner.
+// The semantics live in `CompetitorGapClassifier`.
+struct GapVerdict: Codable, Sendable, Equatable {
+    enum Kind: String, Codable, Sendable {
+        case behind      // both ranked, competitor is ahead of me
+        case ahead       // I'm ahead (better finite rank, or competitor absent)
+        case pureGap     // competitor ranks, I'm absent — the most actionable
+        case neither     // both absent
+        case tied        // identical rank
+    }
+    let kind: Kind
+    let score: Int
+}
