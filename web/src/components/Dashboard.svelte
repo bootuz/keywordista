@@ -314,6 +314,18 @@
           Compare
         </a>
         <!--
+          Gaps page: the competitor keyword-gap matrix — where competitors
+          out-rank you across your tracked keywords.
+        -->
+        <a
+          href="#/gaps"
+          title="Open the competitor gap matrix"
+          aria-label="Open the competitor gap matrix"
+          class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        >
+          Gaps
+        </a>
+        <!--
           External link to the source repo. Sits next to the Settings
           button in the header's "meta actions" cluster. Uses an <a>
           rather than a <button> because it's pure navigation to an

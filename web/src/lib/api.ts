@@ -15,6 +15,7 @@ import type {
   AppMetadataSnapshot,
   CompareResponse,
   CompetitorSearchHit,
+  CompetitorGapRow,
 } from './types';
 
 export const BASE = '/api/v1';
@@ -185,6 +186,12 @@ export const getHistory = (keywordId: string, watchedAppId: string) =>
 
 export const getAppKeywords = (appId: string) =>
   apiFetch<AppKeywordRow[]>(`/apps/${appId}/keywords`);
+
+// Competitor gap matrix for one own app: every (tracked keyword ×
+// competitor) cell with my rank vs theirs. Server scopes/sorts nothing —
+// the page sorts client-side by verdict.score.
+export const getAppGaps = (appId: string) =>
+  apiFetch<CompetitorGapRow[]>(`/apps/${appId}/gaps`);
 
 // Settings — secrets never come back from GET.
 export const getASCSettings = () => apiFetch<ASCStatus>('/settings/asc');
