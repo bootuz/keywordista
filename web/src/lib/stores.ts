@@ -1,11 +1,28 @@
 import { writable, get } from 'svelte/store';
-import type { DashboardRow, WatchedApp, DeveloperKeywordsResponse, AppMetadataSnapshot } from './types';
-import { getDashboard, getRefreshStatus, getDeveloperKeywords } from './api';
+import type { DashboardRow, WatchedApp, DeveloperKeywordsResponse, AppMetadataSnapshot, KeywordOpportunity } from './types';
+import { getDashboard, getRefreshStatus, getDeveloperKeywords, getOpportunity } from './api';
 
 // Shared UI state. Each store has a single owner (the component that calls
 // the matching `set` after an API call); other components subscribe read-only.
 export const dashboard = writable<DashboardRow[]>([]);
 export const apps = writable<WatchedApp[]>([]);
+
+// Opportunity scores, keyed by keywordId — lazily fetched (ASA-backed, so it
+// may be empty / slow) and merged into dashboard rows for display. Mirrors
+// the developerKeywords enrichment pattern.
+export const opportunityByKeyword = writable<Map<string, KeywordOpportunity>>(new Map());
+
+export async function refreshOpportunity(): Promise<void> {
+  try {
+    const rows = await getOpportunity();
+    const map = new Map<string, KeywordOpportunity>();
+    for (const row of rows) map.set(row.keywordId, row);
+    opportunityByKeyword.set(map);
+  } catch {
+    // Non-fatal: ASA may be unconfigured, or the endpoint may 404 on an
+    // older server. The dashboard renders fine without the column.
+  }
+}
 
 // ── Competitor analysis (v2) ────────────────────────────────────────────
 //

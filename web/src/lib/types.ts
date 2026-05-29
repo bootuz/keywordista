@@ -182,6 +182,15 @@ export interface CompetitorGapRow {
   verdict: GapVerdict;
 }
 
+// Opportunity score for a tracked keyword (server: KeywordOpportunity).
+// Present only for ASA-covered keywords — no fabricated popularity.
+export interface KeywordOpportunity {
+  keywordId: string;
+  impressions: number;
+  difficulty: number;
+  opportunity: number;
+}
+
 // Settings DTOs — what the API returns. Secrets never come back; the server
 // only tells us whether they're present.
 export interface ASCStatus {
