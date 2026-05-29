@@ -52,6 +52,50 @@ struct DashboardServiceTests {
         #expect(rows[0].topResults.map(\.position) == [1, 2, 3, 4, 5])
     }
 
+    @Test("dashboard excludes competitor apps — only own apps appear as rows")
+    func dashboard_excludesCompetitors() async throws {
+        let kwID = UUID()
+        let ownID = UUID()
+        let competitorID = UUID()
+        let keyword = Keyword(id: kwID, term: "flashcards", countryCode: "us")
+        let own = WatchedApp(
+            id: ownID, appStoreId: 42, bundleId: "com.mine", name: "Mine",
+            iconURL: nil, kind: .own
+        )
+        let competitor = WatchedApp(
+            id: competitorID, appStoreId: 999, bundleId: "com.competitor",
+            name: "Competitor", iconURL: nil, kind: .competitor
+        )
+
+        // Both apps now have rank checks for the keyword (competitors get
+        // ranked once RefreshService stops filtering them). The dashboard
+        // is the user's *own-app* ranking view, so the competitor row must
+        // NOT leak in — that data belongs to the gap view instead.
+        let rankRepo = InMemoryRankCheckRepository()
+        try await rankRepo.save(RankCheck(
+            keywordID: kwID, watchedAppID: ownID,
+            rank: 5, difficulty: 3, entryBarrier: 2,
+            checkedAt: Date(timeIntervalSince1970: 1_000_000)
+        ))
+        try await rankRepo.save(RankCheck(
+            keywordID: kwID, watchedAppID: competitorID,
+            rank: 2, difficulty: 3, entryBarrier: 2,
+            checkedAt: Date(timeIntervalSince1970: 1_000_000)
+        ))
+
+        let service = DashboardService(
+            keywordRepository: InMemoryKeywordRepository([keyword]),
+            watchedAppRepository: InMemoryWatchedAppRepository([own, competitor]),
+            rankCheckRepository: rankRepo,
+            topResultRepository: InMemoryTopResultSnapshotRepository()
+        )
+
+        let rows = try await service.dashboard(country: nil)
+        #expect(rows.count == 1, "only the own app yields a dashboard row")
+        #expect(rows.first?.watchedAppId == ownID)
+        #expect(!rows.contains(where: { $0.watchedAppId == competitorID }))
+    }
+
     @Test("history returns chronological points")
     func history_isOrdered() async throws {
         let kwID = UUID()

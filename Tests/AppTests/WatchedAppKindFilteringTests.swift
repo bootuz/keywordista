@@ -3,18 +3,25 @@ import Foundation
 import Logging
 import Testing
 
-// Load-bearing invariant: competitor apps participate in metadata
-// snapshots only. They MUST NOT enter `RefreshService` (would litter
-// rank_checks + burn iTunes traffic) or `ChartTrackerService` (would
-// pull chart data the user never asked for). The filter lives in two
-// places — one per service — because the queries iterate differently;
-// these tests pin both to prevent a future "let's unify" refactor
-// from accidentally dropping one.
+// Load-bearing invariant (asymmetric by design — see the competitor
+// keyword-gap feature):
+//
+//   • `RefreshService` ALSO ranks competitor apps. Their rank is read from
+//     the *same* search results we already fetch for the keyword, so it
+//     costs zero extra iTunes traffic, and the gap view depends on it.
+//     Competitor rows are kept out of the main dashboard by
+//     `DashboardService` scoping to `.own` (see DashboardServiceTests).
+//
+//   • `ChartTrackerService` STILL excludes competitors — chart tracking
+//     really would burn extra iTunes traffic (one chart pull per app).
+//
+// These tests pin both halves so a future "let's unify" refactor can't
+// silently collapse the asymmetry in either direction.
 @Suite("WatchedApp.kind filtering across services")
 struct WatchedAppKindFilteringTests {
 
-    @Test("RefreshService.refresh skips competitor apps — only owns get ranked")
-    func refreshSkipsCompetitors() async throws {
+    @Test("RefreshService.refresh ranks competitor apps too — for the gap view")
+    func refreshRanksCompetitors() async throws {
         let keywordID = UUID()
         let ownID = UUID()
         let competitorID = UUID()
@@ -34,9 +41,8 @@ struct WatchedAppKindFilteringTests {
         let rankRepo = InMemoryRankCheckRepository()
         let topRepo = InMemoryTopResultSnapshotRepository()
 
-        // Both apps appear in the search results — if the filter
-        // regressed, we'd see TWO rank_checks (one per app). With the
-        // filter intact, only the own app is ranked.
+        // Both apps appear in the search results — own at position 1,
+        // competitor at position 2. We expect TWO rank_checks: one per app.
         let search = StubSearchClient(canned: [
             .fixture(id: 42, name: "Mine", ratings: 5_000),
             .fixture(id: 999, name: "Competitor", ratings: 10_000),
@@ -55,10 +61,15 @@ struct WatchedAppKindFilteringTests {
         try await service.refresh(keywordID: keywordID, now: Date())
 
         let savedChecks = await rankRepo.saved
-        #expect(savedChecks.count == 1, "exactly one rank_check should land — the own app")
-        #expect(savedChecks.first?.$watchedApp.id == ownID)
-        // The competitor's ID must NOT appear in any saved check.
-        #expect(!savedChecks.contains(where: { $0.$watchedApp.id == competitorID }))
+        #expect(savedChecks.count == 2, "both own and competitor apps should be ranked")
+        #expect(
+            savedChecks.contains(where: { $0.$watchedApp.id == ownID && $0.rank == 1 }),
+            "own app ranked at position 1"
+        )
+        #expect(
+            savedChecks.contains(where: { $0.$watchedApp.id == competitorID && $0.rank == 2 }),
+            "competitor app ranked at position 2 — this is what the gap view consumes"
+        )
     }
 
     // ChartTrackerService.refreshAll is harder to unit-test because it

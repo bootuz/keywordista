@@ -14,13 +14,17 @@ struct DashboardService: DashboardServiceProtocol {
 
     func dashboard(country: String?) async throws -> [DashboardRow] {
         let keywords = try await keywordRepository.filtered(country: country)
-        let allApps = try await watchedAppRepository.all()
+        // Only *own* apps are dashboard rows. Competitors now also have
+        // rank_checks (RefreshService ranks them for the gap view), so this
+        // scoping must be explicit — otherwise competitor rows would leak
+        // into the user's own-app ranking view.
+        let ownApps = try await watchedAppRepository.all().filter { $0.typedKind == .own }
         var rows: [DashboardRow] = []
         for keyword in keywords {
             let keywordID = try keyword.requireID()
             // Every watched app is checked in every country now — primaryCountry
             // no longer scopes the rows.
-            let apps = allApps
+            let apps = ownApps
             let topResults = try await topResultRepository
                 .latestSnapshot(keywordID: keywordID)
                 .map { TopResultDTO(position: $0.position, appStoreId: $0.appStoreId, name: $0.name, iconURL: $0.iconURL) }
