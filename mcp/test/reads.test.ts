@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { competitorGaps } from "../src/tools/reads.js";
+import { competitorGaps, keywordOpportunity } from "../src/tools/reads.js";
 import type { ApiClient } from "../src/client.js";
 
 function fakeClient(rows: unknown): ApiClient {
@@ -50,5 +50,30 @@ describe("competitorGaps", () => {
 
     const ahead = out.rows[2];
     expect(ahead.competitorRank).toBeNull(); // omitted → normalized to null
+  });
+});
+
+function fakeOppClient(rows: unknown): ApiClient {
+  return {
+    resolution: async () => ({ baseURL: "http://fake", source: "env" }),
+    get: async (path: string) => {
+      if (path.endsWith("/keywords/opportunity")) return rows;
+      throw new Error(`unexpected GET ${path}`);
+    },
+    post: async () => ({}) as unknown,
+    del: async () => {},
+  };
+}
+
+describe("keywordOpportunity", () => {
+  it("parses opportunity rows and counts them", async () => {
+    const raw = [
+      { keywordId: APP, impressions: 1000, difficulty: 2, opportunity: 500 },
+      { keywordId: "22222222-2222-2222-2222-222222222222", impressions: 300, difficulty: 5, opportunity: 60 },
+    ];
+    const out = await keywordOpportunity(fakeOppClient(raw), {});
+    expect(out.count).toBe(2);
+    expect(out.rows[0].opportunity).toBe(500);
+    expect(out.rows[1].impressions).toBe(300);
   });
 });

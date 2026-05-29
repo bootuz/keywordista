@@ -2,7 +2,7 @@
 /**
  * Keywordista MCP server — stdio entrypoint.
  *
- * Registers 11 workflow tools against the running Vapor server. The server
+ * Registers 12 workflow tools against the running Vapor server. The server
  * URL is resolved lazily on first tool call (env var → runtime.json → port
  * probe; see runtime.ts) so the MCP server can start cleanly even when the
  * menubar app isn't running yet — the user gets an actionable error on
@@ -32,6 +32,9 @@ import {
   competitorGaps,
   competitorGapsInput,
   competitorGapsOutput,
+  keywordOpportunity,
+  keywordOpportunityInput,
+  keywordOpportunityOutput,
 } from "./tools/reads.js";
 import {
   addApp,
@@ -192,6 +195,23 @@ server.registerTool(
   wrap("competitor_gaps", competitorGapsInput, competitorGapsOutput,
     (i) => competitorGaps(client, i),
     (o) => `${o.losingCount} losing gap${o.losingCount === 1 ? "" : "s"} of ${o.count} cell${o.count === 1 ? "" : "s"}.`),
+);
+
+server.registerTool(
+  "keyword_opportunity",
+  {
+    title: "Keyword opportunity scores",
+    description:
+      "Opportunity scores (impressions ÷ difficulty) for ASA-covered keywords — real Apple Search " +
+      "Ads impressions weighed against difficulty, best bets first. Only keywords with ASA data " +
+      "appear; everything else stays difficulty-only.",
+    inputSchema: shapeOf(keywordOpportunityInput),
+    outputSchema: shapeOf(keywordOpportunityOutput),
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  wrap("keyword_opportunity", keywordOpportunityInput, keywordOpportunityOutput,
+    (i) => keywordOpportunity(client, i),
+    (o) => `${o.count} keyword${o.count === 1 ? "" : "s"} with an opportunity score.`),
 );
 
 // ---------------------------------------------------------------------------
