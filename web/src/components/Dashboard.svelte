@@ -26,52 +26,13 @@
   import SortableHeader from './SortableHeader.svelte';
   import GroupHeader from './GroupHeader.svelte';
   import AppSwitcher from './AppSwitcher.svelte';
-  import SettingsPanel from './SettingsPanel.svelte';
-  import ChartsPage from './ChartsPage.svelte';
-  import { chartEvents, lastVisited, startChartEventPoll } from '../lib/chartEvents';
   import type { DashboardRow as Row } from '../lib/types';
-  // Auth UI (M2.9): in server mode the header shows the signed-in
-  // user's email + a logout button. Both gated on serverMode so
-  // local-mode dashboards stay byte-identical to the pre-M2 UX.
-  import { push } from 'svelte-spa-router';
-  import { logout } from '../lib/auth';
-  import { clearAuthState } from '../lib/authStore';
-  import { currentUser, serverMode } from '../lib/authStore';
-  import { ROUTES } from '../lib/router';
 
   let loading = $state(true);
   let error = $state<string | null>(null);
   let showAddKeyword = $state(false);
   let showAddApp = $state(false);
-  let showSettings = $state(false);
-  let showCharts = $state(false);
   let historyTarget = $state<Row | null>(null);
-
-  let loggingOut = $state(false);
-  async function handleLogout() {
-    if (loggingOut) return;
-    loggingOut = true;
-    try {
-      await logout();
-    } catch {
-      // Logout's idempotent server-side; even on network error the
-      // user expects local state to clear. Fall through.
-    } finally {
-      await clearAuthState();
-      push(ROUTES.login);
-      loggingOut = false;
-    }
-  }
-
-  // Unread chart events for the toolbar badge: count of events created after
-  // the last time the user opened the Charts page. Visible badge nudges them
-  // to look at the activity without competing with the keyword dashboard.
-  const chartsUnreadCount = $derived.by(() => {
-    const last = lastVisited();
-    if (!last) return $chartEvents.length;
-    const lastDate = new Date(last).getTime();
-    return $chartEvents.filter((e) => new Date(e.createdAt).getTime() > lastDate).length;
-  });
 
   // Refresh-all progress is derived directly from the row-level state:
   //   total  = number of keyword IDs in the active batch
@@ -129,10 +90,8 @@
 
   onMount(async () => {
     await load();
-    // Start the singleton chart-event poll. It fires browser notifications
-    // for new transitions and keeps the unread badge live. Safe to call from
-    // anywhere; the loop dedupes itself.
-    startChartEventPoll();
+    // The chart-event poll (notifications + unread badge) now starts in the
+    // persistent Sidebar, so it runs on every product route, not just here.
     // Pull the latest ASC keyword list in the background — localStorage gives
     // us instant-paint badges from the last session; this refresh keeps them
     // current if the user shipped a new version since the page was last open.
@@ -273,110 +232,12 @@
             Refresh ({refreshableCount})
           </button>
         {/if}
-        <button
-          onclick={() => (showCharts = true)}
-          title="Chart positions"
-          aria-label="Charts"
-          class="relative rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-        >
-          Charts
-          {#if chartsUnreadCount > 0}
-            <span
-              class="absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-zinc-950"
-              aria-label="{chartsUnreadCount} unread chart events"
-            >
-              {chartsUnreadCount}
-            </span>
-          {/if}
-        </button>
-        {#if $serverMode && $currentUser}
-          <button
-            onclick={handleLogout}
-            disabled={loggingOut}
-            title="Sign out as {$currentUser.email}"
-            aria-label="Sign out"
-            class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-60"
-          >
-            {loggingOut ? 'Signing out…' : 'Sign out'}
-          </button>
-        {/if}
         <!--
-          Compare page (v2): side-by-side metadata diff against tracked
-          competitors. Uses the hash-router link convention so the SPA
-          handles navigation client-side without a server round-trip.
+          Navigation (Charts / Compare / Gaps), Settings, Sign out, and the
+          GitHub link moved to the persistent sidebar (Sidebar.svelte). This
+          header keeps only the app-scoped controls: AppSwitcher + summary
+          (left) and the +Keyword / Refresh actions (here).
         -->
-        <a
-          href="#/compare"
-          title="Open the compare page"
-          aria-label="Open the compare page"
-          class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-        >
-          Compare
-        </a>
-        <!--
-          Gaps page: the competitor keyword-gap matrix — where competitors
-          out-rank you across your tracked keywords.
-        -->
-        <a
-          href="#/gaps"
-          title="Open the competitor gap matrix"
-          aria-label="Open the competitor gap matrix"
-          class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-1 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-        >
-          Gaps
-        </a>
-        <!--
-          External link to the source repo. Sits next to the Settings
-          button in the header's "meta actions" cluster. Uses an <a>
-          rather than a <button> because it's pure navigation to an
-          external URL; rel=noopener noreferrer prevents the opened tab
-          from accessing window.opener (perf + minor security hardening).
-        -->
-        <a
-          href="https://github.com/bootuz/keywordista"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="View source on GitHub"
-          aria-label="View source on GitHub"
-          class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 p-1.5 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
-        >
-          <!-- GitHub Octicons mark-github (MIT) — single-path so it
-               scales cleanly at 16px and matches the Settings icon's
-               stroke-light visual weight reasonably well at this size. -->
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
-            />
-          </svg>
-        </a>
-        <button
-          onclick={() => (showSettings = true)}
-          title="Settings"
-          aria-label="Settings"
-          class="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 p-1.5 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="12" cy="12" r="3"></circle>
-            <path
-              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-            ></path>
-          </svg>
-        </button>
       </div>
     </div>
   </header>
@@ -466,11 +327,5 @@
       onClose={() => (historyTarget = null)}
       onAdded={load}
     />
-  {/if}
-  {#if showSettings}
-    <SettingsPanel onClose={() => (showSettings = false)} />
-  {/if}
-  {#if showCharts}
-    <ChartsPage onClose={() => (showCharts = false)} />
   {/if}
 </div>
