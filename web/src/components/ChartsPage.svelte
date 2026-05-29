@@ -20,7 +20,9 @@
   import ChartActivityRow from './ChartActivityRow.svelte';
 
   interface Props {
-    onClose: () => void;
+    // Optional: present only when rendered as a legacy modal. As a routed
+    // page the sidebar handles navigation, so no close affordance is shown.
+    onClose?: () => void;
   }
   let { onClose }: Props = $props();
 
@@ -97,14 +99,9 @@
   }
 </script>
 
-<div class="fixed inset-0 z-40 flex flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
-  <!-- Header — matches the dashboard's chrome so the chart page feels like
-       a peer surface rather than a modal. -->
+<div class="flex flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
   <header class="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-6 py-3">
-    <h1 class="text-base font-semibold tracking-tight">Keywordista</h1>
-    <span class="rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
-      Charts
-    </span>
+    <h1 class="text-base font-semibold tracking-tight">Charts</h1>
     <div class="ml-auto flex items-center gap-2">
       <button
         type="button"
@@ -123,13 +120,15 @@
       >
         {probing ? 'Probing…' : 'Re-probe availability'}
       </button>
-      <button
-        type="button"
-        onclick={onClose}
-        class="rounded-md bg-zinc-900 dark:bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-50 dark:text-zinc-950 hover:bg-black dark:hover:bg-white"
-      >
-        Back to Keywords
-      </button>
+      {#if onClose}
+        <button
+          type="button"
+          onclick={onClose}
+          class="rounded-md bg-zinc-900 dark:bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-50 dark:text-zinc-950 hover:bg-black dark:hover:bg-white"
+        >
+          Back to Keywords
+        </button>
+      {/if}
     </div>
   </header>
 
