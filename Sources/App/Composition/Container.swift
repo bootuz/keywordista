@@ -104,6 +104,15 @@ extension Request {
         )
     }
 
+    func opportunityService() -> any OpportunityServiceProtocol {
+        OpportunityService(
+            popularity: keywordPopularityService(),
+            topResultRepository: FluentTopResultSnapshotRepository(db: db),
+            scorer: HeuristicScorer(),
+            now: { Date() }
+        )
+    }
+
     func queueStatusService() -> any QueueStatusServiceProtocol {
         QueueStatusService(db: db)
     }
