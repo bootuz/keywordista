@@ -90,10 +90,13 @@
     </p>
   </header>
 
+  <!-- items-start (not items-end): the country combobox is taller than the
+       plain select, and bottom-aligning would drop the shorter group's label
+       out of line. Top-aligning keeps both field labels on one row. -->
   <section
-    class="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4 flex flex-wrap items-end gap-4"
+    class="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 p-4 flex flex-wrap items-start gap-4"
   >
-    <div class="space-y-1">
+    <div class="flex flex-col gap-1">
       <label class="text-xs uppercase tracking-wide text-zinc-500" for="own-app">Your app</label>
       <select
         id="own-app"
@@ -105,7 +108,7 @@
         {/each}
       </select>
     </div>
-    <div class="space-y-1">
+    <div class="flex flex-col gap-1">
       <span class="text-xs uppercase tracking-wide text-zinc-500">Storefront</span>
       <CountrySingleCombobox
         options={APP_STORE_COUNTRIES}
