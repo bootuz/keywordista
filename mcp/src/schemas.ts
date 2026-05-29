@@ -107,6 +107,30 @@ export const AppKeywordRow = z.object({
 export type AppKeywordRow = z.infer<typeof AppKeywordRow>;
 
 // ---------------------------------------------------------------------------
+// Competitor gap matrix (DashboardController /apps/:id/gaps)
+// ---------------------------------------------------------------------------
+export const GapVerdict = z.object({
+  kind: z.enum(["behind", "ahead", "pureGap", "neither", "tied"]),
+  score: z.number().int(),
+});
+export type GapVerdict = z.infer<typeof GapVerdict>;
+
+// myRank/competitorRank use `.nullish()` (not `.nullable()`) on purpose:
+// Vapor omits nil optionals from JSON, so an absent rank arrives as a
+// MISSING key, not null. The tool normalizes these to explicit null.
+export const CompetitorGapRow = z.object({
+  keywordId: uuid,
+  term: z.string(),
+  countryCode: z.string(),
+  competitorAppId: uuid,
+  competitorName: z.string(),
+  myRank: z.number().int().nullish(),
+  competitorRank: z.number().int().nullish(),
+  verdict: GapVerdict,
+});
+export type CompetitorGapRow = z.infer<typeof CompetitorGapRow>;
+
+// ---------------------------------------------------------------------------
 // Chart watchdog (ChartsController.swift)
 // ---------------------------------------------------------------------------
 // chart-positions is server-side filtered to non-null positions, so the DTO

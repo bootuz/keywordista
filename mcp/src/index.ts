@@ -2,7 +2,7 @@
 /**
  * Keywordista MCP server — stdio entrypoint.
  *
- * Registers 10 workflow tools against the running Vapor server. The server
+ * Registers 11 workflow tools against the running Vapor server. The server
  * URL is resolved lazily on first tool call (env var → runtime.json → port
  * probe; see runtime.ts) so the MCP server can start cleanly even when the
  * menubar app isn't running yet — the user gets an actionable error on
@@ -29,6 +29,9 @@ import {
   chartMovements,
   chartMovementsInput,
   chartMovementsOutput,
+  competitorGaps,
+  competitorGapsInput,
+  competitorGapsOutput,
 } from "./tools/reads.js";
 import {
   addApp,
@@ -172,6 +175,23 @@ server.registerTool(
   wrap("chart_movements", chartMovementsInput, chartMovementsOutput,
     (i) => chartMovements(client, i),
     (o) => `${o.positionsCount} active position${o.positionsCount === 1 ? "" : "s"}, ${o.eventsCount} recent event${o.eventsCount === 1 ? "" : "s"}.`),
+);
+
+server.registerTool(
+  "competitor_gaps",
+  {
+    title: "Competitor keyword gaps",
+    description:
+      "For one of YOUR apps, return the (keyword × competitor) gap matrix: where each competitor " +
+      "out-ranks you ('behind') or ranks while you're absent ('pureGap'), plus where you're ahead/tied. " +
+      "Rows are sorted most-urgent-first. Get the app id from `list_apps` (kind == 'own').",
+    inputSchema: shapeOf(competitorGapsInput),
+    outputSchema: shapeOf(competitorGapsOutput),
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  wrap("competitor_gaps", competitorGapsInput, competitorGapsOutput,
+    (i) => competitorGaps(client, i),
+    (o) => `${o.losingCount} losing gap${o.losingCount === 1 ? "" : "s"} of ${o.count} cell${o.count === 1 ? "" : "s"}.`),
 );
 
 // ---------------------------------------------------------------------------

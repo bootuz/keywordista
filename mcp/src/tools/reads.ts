@@ -13,6 +13,7 @@ import {
   Keyword,
   HistoryPoint,
   DashboardRow,
+  CompetitorGapRow,
   ChartPositionDTO,
   ChartEventDTO,
 } from "../schemas.js";
@@ -155,4 +156,47 @@ export async function chartMovements(client: ApiClient, input: z.infer<typeof ch
     positionsCount: positions.length,
     eventsCount: events.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// competitor_gaps
+// ---------------------------------------------------------------------------
+// For one of the user's OWN apps, the full (keyword × competitor) matrix:
+// where each competitor stands vs the user's app on every tracked keyword.
+const LOSING_KINDS = new Set(["behind", "pureGap"]);
+export const competitorGapsInput = z
+  .object({
+    appId: z
+      .string()
+      .uuid()
+      .describe("UUID of YOUR app (kind == 'own', from `list_apps`) to compute gaps for."),
+    country: z
+      .string()
+      .length(2)
+      .optional()
+      .describe("Optional 2-letter ISO country code (lowercase) to scope keywords."),
+  })
+  .strict();
+export const competitorGapsOutput = z.object({
+  appId: z.string().uuid(),
+  rows: z.array(CompetitorGapRow),
+  count: z.number().int(),
+  // behind + pureGap — the rows actually worth acting on.
+  losingCount: z.number().int(),
+});
+
+export async function competitorGaps(client: ApiClient, input: z.infer<typeof competitorGapsInput>) {
+  const raw = await client.get<unknown>(
+    `/apps/${input.appId}/gaps`,
+    input.country !== undefined ? { country: input.country } : undefined,
+  );
+  const rows = z
+    .array(CompetitorGapRow)
+    .parse(raw)
+    // Normalize Vapor's omitted-nil keys to explicit null for a clean contract.
+    .map((r) => ({ ...r, myRank: r.myRank ?? null, competitorRank: r.competitorRank ?? null }))
+    // Most-urgent-first so the agent reads the actionable rows up top.
+    .sort((a, b) => b.verdict.score - a.verdict.score);
+  const losingCount = rows.filter((r) => LOSING_KINDS.has(r.verdict.kind)).length;
+  return { appId: input.appId, rows, count: rows.length, losingCount };
 }
