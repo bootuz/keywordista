@@ -15,9 +15,17 @@ struct MetadataController: RouteCollection {
         let apps = routes.grouped("apps", ":id")
         apps.get("metadata", use: latest)
         apps.get("metadata", "history", use: history)
+        apps.get("metadata", "lint", use: lint)
         apps.post("metadata", "refresh", use: refresh)
 
         routes.get("compare", use: compare)
+    }
+
+    // Metadata-optimizer findings for this app's listing in one storefront.
+    @Sendable func lint(req: Request) async throws -> [LintFinding] {
+        let appID = try Self.appID(from: req)
+        let country = Self.country(from: req)
+        return try await req.metadataOptimizerService().findings(watchedAppID: appID, country: country)
     }
 
     // MARK: - Per-app endpoints
