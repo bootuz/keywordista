@@ -182,6 +182,15 @@ export interface CompetitorGapRow {
   verdict: GapVerdict;
 }
 
+// A metadata-optimizer finding for an app's listing (title + subtitle).
+// Mirrors the server's LintFinding (Sources/App/Domain/DomainTypes.swift).
+export interface LintFinding {
+  rule: 'duplicateWord' | 'wastedBudget' | 'untrackedWord';
+  severity: 'warning' | 'info';
+  field: string;
+  message: string;
+}
+
 // Settings DTOs — what the API returns. Secrets never come back; the server
 // only tells us whether they're present.
 export interface ASCStatus {
