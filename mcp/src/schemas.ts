@@ -131,6 +131,17 @@ export const CompetitorGapRow = z.object({
 export type CompetitorGapRow = z.infer<typeof CompetitorGapRow>;
 
 // ---------------------------------------------------------------------------
+// Metadata optimizer (MetadataController /apps/:id/metadata/lint)
+// ---------------------------------------------------------------------------
+export const LintFinding = z.object({
+  rule: z.enum(["duplicateWord", "wastedBudget", "untrackedWord"]),
+  severity: z.enum(["warning", "info"]),
+  field: z.string(),
+  message: z.string(),
+});
+export type LintFinding = z.infer<typeof LintFinding>;
+
+// ---------------------------------------------------------------------------
 // Chart watchdog (ChartsController.swift)
 // ---------------------------------------------------------------------------
 // chart-positions is server-side filtered to non-null positions, so the DTO

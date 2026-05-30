@@ -14,6 +14,7 @@ import {
   HistoryPoint,
   DashboardRow,
   CompetitorGapRow,
+  LintFinding,
   ChartPositionDTO,
   ChartEventDTO,
 } from "../schemas.js";
@@ -199,4 +200,36 @@ export async function competitorGaps(client: ApiClient, input: z.infer<typeof co
     .sort((a, b) => b.verdict.score - a.verdict.score);
   const losingCount = rows.filter((r) => LOSING_KINDS.has(r.verdict.kind)).length;
   return { appId: input.appId, rows, count: rows.length, losingCount };
+}
+
+// ---------------------------------------------------------------------------
+// metadata_lint
+// ---------------------------------------------------------------------------
+// Lints an app's listing (title + subtitle) for ASO waste: duplicate words
+// across fields, wasted character budget, and indexed words not tracked.
+export const metadataLintInput = z
+  .object({
+    appId: z.string().uuid().describe("UUID of the app to lint (from `list_apps`)."),
+    country: z
+      .string()
+      .length(2)
+      .optional()
+      .describe("Optional 2-letter ISO country code (lowercase). Defaults to 'us' server-side."),
+  })
+  .strict();
+export const metadataLintOutput = z.object({
+  appId: z.string().uuid(),
+  findings: z.array(LintFinding),
+  count: z.number().int(),
+  warningCount: z.number().int(),
+});
+
+export async function metadataLint(client: ApiClient, input: z.infer<typeof metadataLintInput>) {
+  const raw = await client.get<unknown>(
+    `/apps/${input.appId}/metadata/lint`,
+    input.country !== undefined ? { country: input.country } : undefined,
+  );
+  const findings = z.array(LintFinding).parse(raw);
+  const warningCount = findings.filter((f) => f.severity === "warning").length;
+  return { appId: input.appId, findings, count: findings.length, warningCount };
 }
