@@ -16,6 +16,7 @@ import type {
   CompareResponse,
   CompetitorSearchHit,
   CompetitorGapRow,
+  KeywordOpportunity,
   LintFinding,
 } from './types';
 
@@ -179,6 +180,11 @@ export const getRefreshStatus = () => apiFetch<QueueStatus>('/refresh-status');
 // The web UI filters client-side now; we always fetch the full set.
 // The backend's `?country=` filter remains supported for ad-hoc curl usage.
 export const getDashboard = () => apiFetch<DashboardRow[]>('/dashboard');
+
+// Opportunity scores for ASA-covered keywords. Lazily fetched + merged into
+// the dashboard so it never blocks the main load on the ASA API.
+export const getOpportunity = () =>
+  apiFetch<KeywordOpportunity[]>('/keywords/opportunity');
 
 export const getHistory = (keywordId: string, watchedAppId: string) =>
   apiFetch<HistoryPoint[]>(

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { DashboardRow as Row } from '../lib/types';
   import { refreshKeyword, deleteKeyword, addCompetitor, listCompetitors } from '../lib/api';
-  import { refreshing, markRefreshing, clearRefreshing, ensurePolling, competitors } from '../lib/stores';
+  import { refreshing, markRefreshing, clearRefreshing, ensurePolling, competitors, opportunityByKeyword } from '../lib/stores';
   import { timeAgo } from '../lib/time';
   import AppIcon from './AppIcon.svelte';
   import CountryFlag from './CountryFlag.svelte';
@@ -15,6 +15,10 @@
     onOpenHistory: () => void;
   }
   let { row, onChanged, onOpenHistory }: Props = $props();
+
+  // Opportunity (impressions ÷ difficulty) is keyword-level and only present
+  // for ASA-covered keywords; undefined → the cell shows "—".
+  const opportunity = $derived($opportunityByKeyword.get(row.keywordId));
 
   const isRefreshing = $derived($refreshing.has(row.keywordId));
 
@@ -147,6 +151,13 @@
   </td>
   <td class="px-3 py-2"><DotsIndicator score={row.difficulty} /></td>
   <td class="px-3 py-2"><DotsIndicator score={row.entryBarrier} /></td>
+  <td class="px-3 py-2 text-sm tabular-nums">
+    {#if opportunity}
+      <span class="text-zinc-900 dark:text-zinc-100" title="{opportunity.impressions} ASA impressions ÷ difficulty {opportunity.difficulty}">{opportunity.opportunity}</span>
+    {:else}
+      <span class="text-zinc-400 dark:text-zinc-600">—</span>
+    {/if}
+  </td>
   <td class="px-3 py-2 text-sm text-zinc-500">
     {#if isRefreshing}
       <span class="text-amber-600 dark:text-amber-400">Checking…</span>

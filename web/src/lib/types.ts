@@ -182,6 +182,15 @@ export interface CompetitorGapRow {
   verdict: GapVerdict;
 }
 
+// Opportunity score for a tracked keyword (server: KeywordOpportunity).
+// Present only for ASA-covered keywords — no fabricated popularity.
+export interface KeywordOpportunity {
+  keywordId: string;
+  impressions: number;
+  difficulty: number;
+  opportunity: number;
+}
+
 // A metadata-optimizer finding for an app's listing (title + subtitle).
 // Mirrors the server's LintFinding (Sources/App/Domain/DomainTypes.swift).
 export interface LintFinding {

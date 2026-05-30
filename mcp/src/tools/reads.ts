@@ -14,6 +14,7 @@ import {
   HistoryPoint,
   DashboardRow,
   CompetitorGapRow,
+  KeywordOpportunity,
   LintFinding,
   ChartPositionDTO,
   ChartEventDTO,
@@ -200,6 +201,27 @@ export async function competitorGaps(client: ApiClient, input: z.infer<typeof co
     .sort((a, b) => b.verdict.score - a.verdict.score);
   const losingCount = rows.filter((r) => LOSING_KINDS.has(r.verdict.kind)).length;
   return { appId: input.appId, rows, count: rows.length, losingCount };
+}
+
+// ---------------------------------------------------------------------------
+// keyword_opportunity
+// ---------------------------------------------------------------------------
+// Opportunity scores (impressions ÷ difficulty) for ASA-covered keywords —
+// real Apple Search Ads impressions weighed against difficulty. Only keywords
+// with ASA data appear; everything else is difficulty-only on the dashboard.
+export const keywordOpportunityInput = z.object({}).strict();
+export const keywordOpportunityOutput = z.object({
+  rows: z.array(KeywordOpportunity),
+  count: z.number().int(),
+});
+
+export async function keywordOpportunity(
+  client: ApiClient,
+  _input: z.infer<typeof keywordOpportunityInput>,
+) {
+  const raw = await client.get<unknown>("/keywords/opportunity");
+  const rows = z.array(KeywordOpportunity).parse(raw);
+  return { rows, count: rows.length };
 }
 
 // ---------------------------------------------------------------------------

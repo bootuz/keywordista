@@ -131,6 +131,17 @@ export const CompetitorGapRow = z.object({
 export type CompetitorGapRow = z.infer<typeof CompetitorGapRow>;
 
 // ---------------------------------------------------------------------------
+// Opportunity score (DashboardController /keywords/opportunity)
+// ---------------------------------------------------------------------------
+export const KeywordOpportunity = z.object({
+  keywordId: uuid,
+  impressions: z.number().int(),
+  difficulty: z.number().int(),
+  opportunity: z.number().int(),
+});
+export type KeywordOpportunity = z.infer<typeof KeywordOpportunity>;
+
+// ---------------------------------------------------------------------------
 // Metadata optimizer (MetadataController /apps/:id/metadata/lint)
 // ---------------------------------------------------------------------------
 export const LintFinding = z.object({

@@ -84,6 +84,35 @@ extension Request {
         )
     }
 
+    func keywordPopularityService() -> any KeywordPopularityServiceProtocol {
+        let theHTTP: any ASAHTTPClient = VaporASAHTTPClient(client: client)
+        let theLogger = logger
+        let cache = application.asaTokenCache
+        return KeywordPopularityService(
+            settings: settingsService(),
+            keywordRepo: FluentKeywordRepository(db: db),
+            makeClient: { creds in
+                AppleSearchAdsClient(
+                    credentials: creds,
+                    tokenCache: cache,
+                    http: theHTTP,
+                    logger: theLogger
+                )
+            },
+            now: { Date() },
+            logger: logger
+        )
+    }
+
+    func opportunityService() -> any OpportunityServiceProtocol {
+        OpportunityService(
+            popularity: keywordPopularityService(),
+            topResultRepository: FluentTopResultSnapshotRepository(db: db),
+            scorer: HeuristicScorer(),
+            now: { Date() }
+        )
+    }
+
     func queueStatusService() -> any QueueStatusServiceProtocol {
         QueueStatusService(db: db)
     }

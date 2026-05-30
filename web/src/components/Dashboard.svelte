@@ -9,6 +9,7 @@
     markRefreshing,
     ensurePolling,
     refreshDeveloperKeywords,
+    refreshOpportunity,
   } from '../lib/stores';
   import {
     groupedSections,
@@ -64,7 +65,7 @@
   const visibleRows = $derived($groupedSections.reduce((n, s) => n + s.rows.length, 0));
   const scopedTotal = $derived($appScopedRows.length);
   const flatMode = $derived($groupBy === 'none');
-  const TABLE_COLSPAN = 8;
+  const TABLE_COLSPAN = 9;
 
   // Summary strip — counts based on the app-scoped set, before user filters.
   const summary = $derived(() => {
@@ -97,6 +98,9 @@
     // current if the user shipped a new version since the page was last open.
     // Failure is non-fatal: dashboard rows render fine without the badge.
     void refreshDeveloperKeywords().catch(() => {});
+    // Opportunity scores (ASA-backed) — lazily merged into the table. Empty
+    // when ASA isn't configured; the column just shows "—" then.
+    void refreshOpportunity();
     // If a Refresh All was in flight when the page was unloaded, the queue
     // is still chewing through it. The persisted batch tells us which IDs
     // were in this run; for each, check whether the row's checkedAt has
@@ -281,6 +285,10 @@
               >
               <SortableHeader column="difficulty" label="Difficulty" />
               <SortableHeader column="entryBarrier" label="Entry Barrier" />
+              <th
+                class="px-3 py-2 text-left text-xs uppercase tracking-wide text-zinc-500"
+                title="ASA impressions ÷ difficulty — shown only for keywords with Apple Search Ads data"
+              >Opportunity</th>
               <SortableHeader column="checkedAt" label="Checked" />
               <th class="px-3 py-2 text-right"></th>
             </tr>

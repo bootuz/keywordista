@@ -193,6 +193,17 @@ struct GapVerdict: Codable, Sendable, Equatable {
     let score: Int
 }
 
+// Opportunity score for a tracked keyword: real ASA impressions weighed
+// against difficulty. Present ONLY for ASA-covered keywords (per the #43
+// spike — no fabricated popularity); keywords without ASA data simply have
+// no row here and stay difficulty-only on the dashboard.
+struct KeywordOpportunity: Codable, Sendable, Equatable {
+    let keywordId: UUID
+    let impressions: Int   // real ASA search-terms impressions (last 30d)
+    let difficulty: Int    // 1–5, from the keyword's top-results landscape
+    let opportunity: Int   // impressions ÷ difficulty — higher = better bet
+}
+
 // A single metadata-optimizer finding for a watched app's listing. The
 // linter (MetadataLinter) emits these from the indexed short fields
 // (title + subtitle) against the user's tracked keywords.

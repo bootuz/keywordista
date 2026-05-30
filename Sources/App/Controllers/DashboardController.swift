@@ -6,6 +6,14 @@ struct DashboardController: RouteCollection {
         routes.get("keywords", ":id", "history", use: history)
         routes.get("apps", ":id", "keywords", use: appKeywords)
         routes.get("apps", ":id", "gaps", use: competitorGaps)
+        routes.get("keywords", "opportunity", use: opportunity)
+    }
+
+    // Opportunity scores (impressions × difficulty) for ASA-covered keywords.
+    // Lazily fetched by the SPA and merged into the dashboard — it can touch
+    // the ASA API, so it must not block the main dashboard load.
+    @Sendable func opportunity(req: Request) async throws -> [KeywordOpportunity] {
+        try await req.opportunityService().opportunities()
     }
 
     @Sendable func dashboard(req: Request) async throws -> [DashboardRow] {
