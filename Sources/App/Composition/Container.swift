@@ -144,6 +144,14 @@ extension Request {
         )
     }
 
+    func metadataOptimizerService() -> any MetadataOptimizerServiceProtocol {
+        MetadataOptimizerService(
+            snapshotRepository: FluentAppMetadataSnapshotRepository(db: db),
+            keywordRepository: FluentKeywordRepository(db: db),
+            linter: MetadataLinter()
+        )
+    }
+
     func versionService() -> any VersionServiceProtocol {
         VersionService(
             client: client,

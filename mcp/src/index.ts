@@ -2,7 +2,7 @@
 /**
  * Keywordista MCP server — stdio entrypoint.
  *
- * Registers 12 workflow tools against the running Vapor server. The server
+ * Registers 13 workflow tools against the running Vapor server. The server
  * URL is resolved lazily on first tool call (env var → runtime.json → port
  * probe; see runtime.ts) so the MCP server can start cleanly even when the
  * menubar app isn't running yet — the user gets an actionable error on
@@ -35,6 +35,9 @@ import {
   keywordOpportunity,
   keywordOpportunityInput,
   keywordOpportunityOutput,
+  metadataLint,
+  metadataLintInput,
+  metadataLintOutput,
 } from "./tools/reads.js";
 import {
   addApp,
@@ -212,6 +215,22 @@ server.registerTool(
   wrap("keyword_opportunity", keywordOpportunityInput, keywordOpportunityOutput,
     (i) => keywordOpportunity(client, i),
     (o) => `${o.count} keyword${o.count === 1 ? "" : "s"} with an opportunity score.`),
+);
+
+server.registerTool(
+  "metadata_lint",
+  {
+    title: "Metadata optimizer findings",
+    description:
+      "Lint an app's listing (title + subtitle) for ASO waste: duplicate words across fields, " +
+      "wasted character budget, and indexed words you don't track. Get the app id from `list_apps`.",
+    inputSchema: shapeOf(metadataLintInput),
+    outputSchema: shapeOf(metadataLintOutput),
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  wrap("metadata_lint", metadataLintInput, metadataLintOutput,
+    (i) => metadataLint(client, i),
+    (o) => `${o.count} finding${o.count === 1 ? "" : "s"} (${o.warningCount} warning${o.warningCount === 1 ? "" : "s"}).`),
 );
 
 // ---------------------------------------------------------------------------

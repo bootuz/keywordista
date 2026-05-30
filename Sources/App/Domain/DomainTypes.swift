@@ -203,3 +203,19 @@ struct KeywordOpportunity: Codable, Sendable, Equatable {
     let difficulty: Int    // 1–5, from the keyword's top-results landscape
     let opportunity: Int   // impressions ÷ difficulty — higher = better bet
 }
+
+// A single metadata-optimizer finding for a watched app's listing. The
+// linter (MetadataLinter) emits these from the indexed short fields
+// (title + subtitle) against the user's tracked keywords.
+struct LintFinding: Codable, Sendable, Equatable {
+    enum Severity: String, Codable, Sendable { case warning, info }
+    enum Rule: String, Codable, Sendable {
+        case duplicateWord   // a word indexed in more than one field (wasted)
+        case wastedBudget    // an indexed field well under its character limit
+        case untrackedWord   // an indexed word the user doesn't track
+    }
+    let rule: Rule
+    let severity: Severity
+    let field: String      // which field(s) the finding concerns
+    let message: String    // human-readable, actionable
+}

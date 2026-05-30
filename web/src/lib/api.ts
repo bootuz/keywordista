@@ -17,6 +17,7 @@ import type {
   CompetitorSearchHit,
   CompetitorGapRow,
   KeywordOpportunity,
+  LintFinding,
 } from './types';
 
 export const BASE = '/api/v1';
@@ -198,6 +199,12 @@ export const getAppKeywords = (appId: string) =>
 // the page sorts client-side by verdict.score.
 export const getAppGaps = (appId: string) =>
   apiFetch<CompetitorGapRow[]>(`/apps/${appId}/gaps`);
+
+// Metadata-optimizer findings for an app's listing in one storefront.
+export const getMetadataLint = (appId: string, country = 'us') =>
+  apiFetch<LintFinding[]>(
+    `/apps/${appId}/metadata/lint?country=${encodeURIComponent(country)}`,
+  );
 
 // Settings — secrets never come back from GET.
 export const getASCSettings = () => apiFetch<ASCStatus>('/settings/asc');

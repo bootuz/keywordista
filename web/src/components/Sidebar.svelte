@@ -58,6 +58,7 @@
     { href: ROUTES.charts, label: 'Charts' },
     { href: ROUTES.compare, label: 'Compare' },
     { href: ROUTES.gaps, label: 'Gaps' },
+    { href: ROUTES.optimizer, label: 'Optimizer' },
   ];
 
   // Shared classes for a sidebar row (nav link or meta button).
@@ -113,8 +114,10 @@
               <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
             {:else if item.label === 'Compare'}
               <rect x="3" y="3" width="7" height="18" /><rect x="14" y="3" width="7" height="18" />
-            {:else}
+            {:else if item.label === 'Gaps'}
               <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="0.5" fill="currentColor" />
+            {:else}
+              <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z" />
             {/if}
           </svg>
           {#if item.label === 'Charts' && chartsUnread > 0}
