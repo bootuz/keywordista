@@ -178,6 +178,23 @@ extension Application {
         typealias Value = ASATokenCache
     }
 
+    /// The process's Apple Ads client owner. Set once in `configure` (not
+    /// lazily) so two concurrent first requests can't each create a session
+    /// and each pay an OAuth exchange.
+    var appleAdsSession: AppleAdsSession {
+        get {
+            guard let session = storage[AppleAdsSessionKey.self] else {
+                fatalError("appleAdsSession not configured; set it in configure()")
+            }
+            return session
+        }
+        set { storage[AppleAdsSessionKey.self] = newValue }
+    }
+
+    private struct AppleAdsSessionKey: StorageKey {
+        typealias Value = AppleAdsSession
+    }
+
     // Factories used by Queues jobs, where we only have a `QueueContext`.
     var refreshServiceFactory: @Sendable (QueueContext) -> any RefreshServiceProtocol {
         { context in

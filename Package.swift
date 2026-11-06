@@ -26,6 +26,11 @@ let package = Package(
         // retired 2027-01-26). Pinned exact: the package is generated from a
         // moving OpenAPI spec, so minor bumps can reshape generated types.
         .package(url: "https://github.com/apple/apple-ads-platform-api-swift", exact: "1.109.0"),
+        // Already in the graph via AppleAdsClient; declared so App can name
+        // their products (ServiceGroup lifecycle, ClientTransport/middleware).
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.3.0"),
+        .package(url: "https://github.com/apple/swift-openapi-runtime.git", from: "1.4.0"),
+        .package(url: "https://github.com/apple/swift-http-types.git", from: "1.3.0"),
     ],
     targets: [
         .executableTarget(
@@ -39,6 +44,9 @@ let package = Package(
                 .product(name: "QueuesFluentDriver", package: "vapor-queues-fluent-driver"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "AppleAdsClient", package: "apple-ads-platform-api-swift"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ],
             path: "Sources/App",
             swiftSettings: [

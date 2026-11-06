@@ -115,6 +115,11 @@ public func configure(_ app: Application) async throws {
         """).run()
     }
 
+    // Apple Ads: one long-lived client for the process, stopped on shutdown
+    // so its token-refresh HTTPClient is closed cleanly.
+    app.appleAdsSession = AppleAdsSession.live(logger: app.logger)
+    app.lifecycle.use(AppleAdsSessionShutdown())
+
     app.queues.use(.fluent())
     app.queues.add(RefreshKeywordJob())
     app.queues.schedule(DailyRefreshScheduler())
