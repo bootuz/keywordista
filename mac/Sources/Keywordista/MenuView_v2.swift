@@ -106,16 +106,22 @@ struct MenuView_v2: View {
             switch instance.kind {
             case .local:
                 Divider()
+                if case .crashed(let reason) = supervisor.status {
+                    Text("⚠ Backend: \(reason)")
+                        .foregroundStyle(.secondary)
+                }
                 Button("Restart backend") {
                     Task {
                         await supervisor.stop()
                         await supervisor.start()
                     }
                 }
+                // Enabled while .crashed too: Stop is how the user cancels
+                // a queued auto-restart.
                 Button("Stop") {
                     Task { await supervisor.stop() }
                 }
-                .disabled(supervisor.status != .running)
+                .disabled(supervisor.status == .stopped)
 
             case .remote(let remote):
                 Divider()

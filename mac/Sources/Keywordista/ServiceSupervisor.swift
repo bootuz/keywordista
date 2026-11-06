@@ -23,6 +23,12 @@ enum ServiceStatus: Equatable {
 //
 // Port resolution: prefer 8080, fall back to 8081..8090 if it's busy. The
 // chosen port is published so HealthMonitor and the menu URL both follow.
+//
+// Auto-restart: an exit we didn't ask for is relaunched with backoff
+// (RestartBackoff decides when, and when to give up). An exit we caused —
+// stop(), which Quit, the menu's Stop/Restart and the update swap all go
+// through — never is: stop() detaches the process before signalling it and
+// cancels any queued relaunch.
 @MainActor
 final class ServiceSupervisor: ObservableObject {
     @Published private(set) var status: ServiceStatus = .stopped
@@ -32,6 +38,9 @@ final class ServiceSupervisor: ObservableObject {
     static let maxFallbackOffset: UInt16 = 10  // → 8080…8090 inclusive
 
     private var process: Process?
+    private var launchedAt: Date?
+    private var backoff = RestartBackoff()
+    private var pendingRestart: Task<Void, Never>?
     private let dataDir: URL
     private let logsDir: URL
 
@@ -52,6 +61,15 @@ final class ServiceSupervisor: ObservableObject {
 
     func start() async {
         guard status != .running, status != .starting else { return }
+        // A start from outside (app launch, the menu, the update flow) is
+        // the user asking for a fresh try, so it gets a full restart
+        // budget even if auto-restart had already given up.
+        cancelPendingRestart()
+        backoff.reset()
+        launch()
+    }
+
+    private func launch() {
         status = .starting
 
         guard let binaryURL = resolveBinary() else {
@@ -99,21 +117,21 @@ final class ServiceSupervisor: ObservableObject {
             // concurrently-executing code".
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // Distinguish a clean stop (we called terminate()) from a crash.
-                if self.process === proc {
-                    self.process = nil
-                    if case .stopped = self.status {
-                        // already cleared by stop()
-                    } else {
-                        self.status = .crashed(reason: "exited with code \(proc.terminationStatus)")
-                    }
-                }
+                // stop() detaches self.process before signalling, so only an
+                // exit we didn't ask for still matches here.
+                guard self.process === proc else { return }
+                self.process = nil
+                let exit = proc.terminationReason == .uncaughtSignal
+                    ? "killed by signal \(proc.terminationStatus)"
+                    : "exited with code \(proc.terminationStatus)"
+                self.handleUnexpectedExit(exit)
             }
         }
 
         do {
             try process.run()
             self.process = process
+            launchedAt = Date()
             status = .running
             // Publish the chosen base URL to a sidecar file. The Keywordista
             // MCP server (mcp/) reads this to find us — without it, an MCP
@@ -127,12 +145,18 @@ final class ServiceSupervisor: ObservableObject {
     }
 
     func stop() async {
+        cancelPendingRestart()
+        backoff.reset()
         guard let process, process.isRunning else {
+            self.process = nil
             status = .stopped
             return
         }
-        // SIGTERM, then escalate to SIGKILL if it hasn't exited in 5s. The
-        // termination handler clears self.process; we just signal here.
+        // Detach before signalling. The termination handler can run during
+        // the wait below (Task.sleep yields the main actor), and it treats
+        // any exit of the *current* process as a crash to auto-restart.
+        self.process = nil
+        // SIGTERM, then escalate to SIGKILL if it hasn't exited in 5s.
         process.terminate()
         for _ in 0..<50 {
             if !process.isRunning { break }
@@ -141,9 +165,36 @@ final class ServiceSupervisor: ObservableObject {
         if process.isRunning {
             kill(process.processIdentifier, SIGKILL)
         }
-        self.process = nil
         status = .stopped
         removeRuntimeSidecar()
+    }
+
+    // MARK: - Auto-restart
+
+    private func handleUnexpectedExit(_ exit: String) {
+        let now = Date()
+        let uptime = launchedAt.map { now.timeIntervalSince($0) } ?? 0
+        switch backoff.recordCrash(at: now, uptime: uptime) {
+        case .restart(let delay, let attempt):
+            status = .crashed(reason: "\(exit); restarting in \(Int(delay))s (attempt \(attempt) of \(backoff.policy.maxAttempts))")
+            pendingRestart = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    return  // cancelled by stop() or a manual start()
+                }
+                guard let self, case .crashed = self.status else { return }
+                self.pendingRestart = nil
+                self.launch()
+            }
+        case .giveUp(let attempts):
+            status = .crashed(reason: "\(exit); gave up after \(attempts) restarts")
+        }
+    }
+
+    private func cancelPendingRestart() {
+        pendingRestart?.cancel()
+        pendingRestart = nil
     }
 
     // MARK: - Runtime sidecar (MCP discovery)
@@ -154,7 +205,8 @@ final class ServiceSupervisor: ObservableObject {
     //   { "baseURL": "http://127.0.0.1:8083", "pid": 12345, "writtenAt": "<iso>" }
     //
     // Lifecycle: written after a successful `process.run()` in start(),
-    // removed in stop(). On a crash the file is stale until next boot —
+    // removed in stop(). On a crash the file is stale until the next launch
+    // (an auto-restart rewrites it with the new port) —
     // acceptable because the MCP server will fall back to probing if the
     // file points at a dead port.
 
@@ -255,8 +307,7 @@ final class ServiceSupervisor: ObservableObject {
     // There IS a TOCTOU race: between our bind/close test and the child
     // process binding, something else could claim the port. In practice
     // it's vanishingly rare for a personal dev tool, and if it happens the
-    // child crashes on bind, the terminationHandler marks .crashed, and
-    // the user can quit/relaunch to retry.
+    // child crashes on bind and auto-restart picks a port again.
 
     private func resolveFreePort() -> UInt16? {
         for offset in 0...Self.maxFallbackOffset {

@@ -115,7 +115,7 @@ Dev server proxies `/api` to `:8080` (see `vite.config.ts`). Production build em
 ## Architecture: menubar (`mac/`)
 
 `MenuBarExtra`-based SwiftUI app (`LSUIElement`). Key files in `mac/Sources/Keywordista/`:
-- `ServiceSupervisor.swift` — picks a free port in 8080–8090, spawns the server binary with `--hostname 127.0.0.1 --port <chosen>`, supervises restart.
+- `ServiceSupervisor.swift` — picks a free port in 8080–8090, spawns the server binary with `--hostname 127.0.0.1 --port <chosen>`, auto-restarts it after a crash with backoff and an attempt cap (`RestartBackoff.swift`). Only `stop()` exits are treated as intentional.
 - `HealthMonitor.swift` — pings `/health` to detect crashes.
 - `UpdateChecker.swift` — pulls service tarballs from GitHub Releases (server auto-updates; the `.app` itself needs a DMG re-download).
 - `LoginItemManager.swift` — login-item registration.
