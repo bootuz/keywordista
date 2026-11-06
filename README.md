@@ -152,7 +152,8 @@ Everything under `/api/v1`. No auth, `127.0.0.1`-only. Five categories: **apps**
 | `GET` | `/chart-positions` | Currently-charted snapshot rows |
 | `GET` | `/chart-events?since=&limit=` | Append-only watchdog activity feed (SPA polls this) |
 | `POST` | `/charts/refresh` | Kick the chart watchdog immediately |
-| `GET` | `/settings/{asc,asa}` | Read App Store Connect / Apple Search Ads credential status |
+| `GET` | `/settings/{asc,asa}` | Read App Store Connect / Apple Ads credential status |
+| `GET` | `/settings/asa/accounts` | Ad accounts the stored Apple Ads credentials can reach |
 | `PUT`/`DELETE` | `/settings/{asc,asa}` | Update / clear those credentials |
 | `GET` | `/version` | `{ current, latest, updateAvailable, downloadUrl }` |
 
@@ -164,7 +165,8 @@ See [`requests.http`](requests.http) for ready-to-run examples.
 
 ## What's not here
 
-- **Apple Search Ads popularity scores.** v1 derives `difficulty` and `entryBarrier` from search results alone. ASA credentials slot in at `/api/v1/settings/asa` is wired, just no fetcher consuming it yet.
+- **Estimated popularity.** `difficulty` and `entryBarrier` come from search results alone. Real demand comes only from your own Apple Ads search-term reports (Platform API v1): the opportunity score and keyword suggestions exist for keywords your campaigns have seen, and nothing is guessed for the rest.
+- **Apple Ads campaign management.** Keywordista reads campaigns and search-term reports; it doesn't pause campaigns, change bids or budgets, or edit keywords yet.
 - **Chart-position history / sparklines.** The watchdog stores only the latest position per `(app, country, chart, genre)`; a `chart_position_history` table is the v2 follow-up.
 - **Auto-updates of the menu-bar app itself.** The server can update independently (it pulls service tarballs from GitHub Releases), but bumping the `.app` version still means downloading a new DMG.
 - **Linux / Windows.** Vapor runs everywhere; `Keywordista.app` is macOS-only. Linux users can clone + `./keywordista` from source.
