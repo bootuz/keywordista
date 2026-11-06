@@ -24,6 +24,7 @@ import ComparePage from '../components/ComparePage.svelte';
 import GapsPage from '../components/GapsPage.svelte';
 import ChartsPage from '../components/ChartsPage.svelte';
 import OptimizerPage from '../components/OptimizerPage.svelte';
+import AppleAdsPage from '../components/AppleAdsPage.svelte';
 import NotFoundPage from '../components/NotFoundPage.svelte';
 
 // Routes are wildcards-last per svelte-spa-router conventions —
@@ -47,6 +48,9 @@ export const routes: RouteDefinition = {
   '/gaps': GapsPage,
   '/charts': ChartsPage,
   '/optimizer': OptimizerPage,
+  // One page, four tabs (overview, keywords, ideas, setup); the tab is in
+  // the path so a link can open Setup directly.
+  '/apple-ads/:tab?': AppleAdsPage,
   // Wildcard last — anything unmatched lands on the 404 page.
   '*': NotFoundPage,
 };
@@ -64,4 +68,5 @@ export const ROUTES = {
   gaps: '/gaps',
   charts: '/charts',
   optimizer: '/optimizer',
+  appleAds: (tab: 'overview' | 'keywords' | 'ideas' | 'setup' = 'overview') => `/apple-ads/${tab}`,
 } as const;

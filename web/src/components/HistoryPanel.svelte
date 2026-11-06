@@ -332,7 +332,7 @@
       </div>
 
       {#if suggestionsLoading}
-        <p class="text-sm text-zinc-500">Looking up search terms from your Apple Search Ads campaign…</p>
+        <p class="text-sm text-zinc-500">Reading search terms from your last Apple Ads sync…</p>
       {:else if suggestionsError}
         <p class="text-sm text-red-600 dark:text-red-400">{suggestionsError}</p>
         <button
@@ -376,7 +376,7 @@
                 Your campaign is serving impressions, but every individual query is still under Apple's
                 privacy threshold. Wait for traffic to accumulate.
               {:else}
-                Apple Search Ads only surfaces search terms after your discovery campaign has served
+                Apple Ads only surfaces search terms after your discovery campaign has served
                 impressions for this storefront. If you just created the campaign, check back in a day or two.
               {/if}
             </p>
@@ -405,7 +405,7 @@
           </div>
         {:else}
         <p class="mb-3 text-xs text-zinc-500">
-          Queries from your Apple Search Ads campaigns in {countryCode.toUpperCase()} that mention
+          Queries from your Apple Ads campaigns in {countryCode.toUpperCase()} that mention
           <span class="text-zinc-700 dark:text-zinc-300">{keywordTerm}</span>. Sorted by relevance.
         </p>
 

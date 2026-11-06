@@ -75,23 +75,18 @@ struct BackupTests {
             let app = try await BackupTests.makeApp()
             defer { Task { try? await app.asyncShutdown() } }
 
-            let countBefore = try FileManager.default
-                .contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
-                .filter { $0.hasPrefix("keywordista-snapshot-") }
-                .count
+            // A directory of its own: the other snapshot tests run in
+            // parallel and write to the shared temp dir, so counting files
+            // there raced (CI saw another test's file mid-snapshot).
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("keywordista-backup-test-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
 
-            _ = try await Backup.takeSQLiteSnapshot(of: ":memory:", on: app.db)
+            _ = try await Backup.takeSQLiteSnapshot(of: ":memory:", on: app.db, in: dir)
 
-            let countAfter = try FileManager.default
-                .contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
-                .filter { $0.hasPrefix("keywordista-snapshot-") }
-                .count
-            // We don't assert strict equality — concurrent tests
-            // could leave temp files behind. Asserting "not greater"
-            // is the meaningful check: our call cleaned up its OWN
-            // file, regardless of what other tests are doing.
-            #expect(countAfter <= countBefore + 0,
-                    "snapshot temp file leaked: \(countBefore) → \(countAfter)")
+            let left = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            #expect(left.isEmpty, "snapshot temp file leaked: \(left)")
         }
     }
 

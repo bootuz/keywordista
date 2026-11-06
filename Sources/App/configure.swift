@@ -80,6 +80,7 @@ public func configure(_ app: Application) async throws {
     // contiguously so the diff is easy to read.
     app.migrations.add(AddKindToWatchedApp())
     app.migrations.add(CreateAppMetadataSnapshot())
+    app.migrations.add(CreateAppleAdsMirror())
 
     try await app.autoMigrate()
 
@@ -119,6 +120,9 @@ public func configure(_ app: Application) async throws {
     // so its token-refresh HTTPClient is closed cleanly.
     app.appleAdsSession = AppleAdsSession.live(logger: app.logger)
     app.lifecycle.use(AppleAdsSessionShutdown())
+    app.appleAdsSyncCoordinator = AppleAdsSyncCoordinator(logger: app.logger) { [unowned app] in
+        app.makeAppleAdsSyncService()
+    }
 
     app.queues.use(.fluent())
     app.queues.add(RefreshKeywordJob())
@@ -128,6 +132,11 @@ public func configure(_ app: Application) async throws {
     app.queues.schedule(RefreshChartsScheduler())
         .daily()
         .at("4:00am")
+    // 04:30, after the three jobs above, so nothing stacks. Runs outside
+    // the queue worker; see AppleAdsSyncCoordinator.
+    app.queues.schedule(AppleAdsSyncScheduler())
+        .daily()
+        .at("4:30am")
     // Competitor analysis (v2): the metadata-snapshot pass slots
     // between the two existing daily jobs so the three don't stack on
     // the same minute (single-worker queue would serialize them anyway,

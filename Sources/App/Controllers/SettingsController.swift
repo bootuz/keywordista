@@ -112,15 +112,29 @@ struct SettingsController: RouteCollection {
             throw Abort(.badRequest, reason: "clientSecret is required for first-time setup")
         }
 
+        // A different client ID is a different API user, whose ad accounts
+        // the stored choice may not belong to: drop it unless one is sent.
+        let newAdAccountId = payload.adAccountId.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            ?? (existing?.clientId == clientId ? existing?.adAccountId : nil)
         try await service.setASACredentials(ASACredentials(
             clientId: clientId,
             clientSecret: resolvedSecret,
             orgId: payload.orgId?.trimmingCharacters(in: .whitespacesAndNewlines),
-            // A different client ID is a different API user, whose ad accounts
-            // the stored choice may not belong to: drop it unless one is sent.
-            adAccountId: payload.adAccountId.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                ?? (existing?.clientId == clientId ? existing?.adAccountId : nil)
+            adAccountId: newAdAccountId
         ))
+
+        // A different API user, or an account other than the one the data was
+        // synced from: those numbers belong to someone else, so they go (the
+        // user chose deletion over hiding). Picking the account the sync had
+        // already resolved on "Automatic" keeps them. Purging after the save
+        // means a rejected save never costs the data.
+        let synced = try await req.appleAdsDataRepository().lastSuccessfulRun(adAccountId: nil)?.adAccountId
+        let picked = newAdAccountId.flatMap { Int64($0) }
+        let otherAccount = picked != nil && synced != nil && picked != synced
+        if let existing, existing.clientId != clientId || otherAccount {
+            await req.application.appleAdsSyncCoordinator.cancelAndWait()
+            try await req.appleAdsDataRepository().purgeAll()
+        }
         return try await service.getASAStatus()
     }
 
@@ -136,6 +150,10 @@ struct SettingsController: RouteCollection {
 
     @Sendable func deleteASA(req: Request) async throws -> HTTPStatus {
         try await req.settingsService().clearASACredentials()
+        // Disconnect deletes everything copied from Apple. Stop a running
+        // sync first so it can't write after the purge.
+        await req.application.appleAdsSyncCoordinator.cancelAndWait()
+        try await req.appleAdsDataRepository().purgeAll()
         // Disconnect means stop using the key now: the live client would
         // otherwise keep refreshing OAuth tokens with it until a restart.
         await req.application.appleAdsSession.shutdown()

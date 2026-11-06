@@ -3,9 +3,9 @@ import Foundation
 import Logging
 import OpenAPIRuntime
 
-// Apple Ads Platform API v1 adapter behind the protocol the suggestion,
-// popularity, and opportunity services already consume. The services never
-// see v1 types: if Apple changes the wire again, only this file moves.
+// Apple Ads Platform API v1 adapter. Account resolution, campaigns and the
+// shared call plumbing live here; the sync's reads are in
+// AppleAdsReportingClient. Nothing outside this folder sees v1 types.
 //
 // Auth: the user's long-lived JWT is the OAuth client secret. The library
 // exchanges it for access tokens and refreshes them; `AppleAdsSession`
@@ -15,38 +15,7 @@ import OpenAPIRuntime
 // adAccountId=…`. Which account comes from settings when the user picked
 // one, otherwise from the ACL list (see `resolveAdAccountId`).
 
-protocol AppleSearchAdsClientProtocol: Sendable {
-    /// Lists all Apple Ads campaigns the API user can see. Used to discover
-    /// the campaign id(s) for a given storefront without making the user
-    /// hard-code anything.
-    func listCampaigns() async throws -> [ASACampaign]
-
-    /// Pulls search-term performance for a campaign over a date window.
-    /// Empty array is a valid response (a new campaign has no data yet).
-    func searchTermsReport(
-        campaignId: Int64,
-        startDate: Date,
-        endDate: Date
-    ) async throws -> [ASASearchTerm]
-}
-
-struct ASACampaign: Sendable, Equatable {
-    let id: Int64
-    let name: String
-    let countriesOrRegions: [String]  // ISO uppercased, e.g. ["US"]
-    let displayStatus: String         // e.g. "RUNNING", "PAUSED"
-}
-
-struct ASASearchTerm: Sendable, Equatable {
-    let text: String           // The query the user typed
-    let source: String         // "AUTO" (Search Match) | "TARGETED" | …
-    let impressions: Int
-    let taps: Int
-    let ttr: Double            // 0…1
-    let localSpend: Double     // in the campaign's currency
-}
-
-struct AppleAdsPlatformClient: AppleSearchAdsClientProtocol {
+struct AppleAdsPlatformClient: Sendable {
     let credentials: ASACredentials
     let session: AppleAdsSession
     let logger: Logger
@@ -116,38 +85,9 @@ struct AppleAdsPlatformClient: AppleSearchAdsClientProtocol {
 
     // MARK: Campaigns
 
-    func listCampaigns() async throws -> [ASACampaign] {
-        let context = XApContext(adAccountID: try await resolveAdAccountId()).rawValue
-        var campaigns: [ASACampaign] = []
-        var offset = 0
-        while true {
-            let request = Components.Schemas.QueryRequest(
-                filters: [.init(field: "promotedObjectType", _operator: .equals, value: "APPSTORE_APP")],
-                pagination: .init(pageSize: Int32(Self.campaignPageSize), offset: Int32(offset), fetchTotalCount: true)
-            )
-            let page = try await call { api in
-                switch try await api.postCampaignsQuery(headers: .init(xApContext: context), body: .json(request)) {
-                case .ok(let ok): return try ok.body.json.value1
-                case .badRequest(let r): throw AppleAdsError.status(400, try? r.body.json)
-                case .unauthorized: throw AppleAdsError.unauthorized
-                case .forbidden: throw AppleAdsError.forbidden
-                case .notFound(let r): throw AppleAdsError.status(404, try? r.body.json)
-                case .tooManyRequests: throw AppleAdsError.rateLimited
-                case .internalServerError(let r): throw AppleAdsError.status(500, try? r.body.json)
-                case .undocumented(let status, _): throw AppleAdsError.status(status)
-                }
-            }
-            let items = page.result ?? []
-            campaigns += try items.map(Self.campaign(from:))
-            offset += items.count
-            let total = page.pagination?.totalCount.map(Int.init) ?? offset
-            if items.isEmpty || offset >= total { return campaigns }
-        }
-    }
-
     /// v1's campaign query returns untyped objects. Decode only the fields
     /// we use, tolerating an `id` sent as a string: Apple's docs show both.
-    private struct CampaignFields: Decodable {
+    struct CampaignFields: Decodable {
         struct Targeting: Decodable {
             struct Countries: Decodable { let include: [String]? }
             let countryOrRegion: Countries?
@@ -156,8 +96,15 @@ struct AppleAdsPlatformClient: AppleSearchAdsClientProtocol {
         let name: String?
         let displayStatus: String?
         let targeting: Targeting?
+        let promotedObjectId: String?
+        let dailyBudget: Budget?
 
-        enum CodingKeys: String, CodingKey { case id, name, displayStatus, targeting }
+        struct Budget: Decodable {
+            struct Money: Decodable { let amount: String?; let currency: String? }
+            let value: Money?
+        }
+
+        enum CodingKeys: String, CodingKey { case id, name, displayStatus, targeting, promotedObjectId, dailyBudget }
 
         init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -173,76 +120,18 @@ struct AppleAdsPlatformClient: AppleSearchAdsClientProtocol {
             name = try c.decodeIfPresent(String.self, forKey: .name)
             displayStatus = try c.decodeIfPresent(String.self, forKey: .displayStatus)
             targeting = try c.decodeIfPresent(Targeting.self, forKey: .targeting)
-        }
-    }
-
-    private static func campaign(from object: OpenAPIObjectContainer) throws -> ASACampaign {
-        do {
-            let fields = try JSONDecoder().decode(CampaignFields.self, from: JSONEncoder().encode(object))
-            return ASACampaign(
-                id: fields.id,
-                name: fields.name ?? "",
-                countriesOrRegions: (fields.targeting?.countryOrRegion?.include ?? []).map { $0.uppercased() },
-                displayStatus: fields.displayStatus ?? "UNKNOWN"
-            )
-        } catch {
-            throw AppleAdsError.unreadableResponse("campaign: \(error)".prefix(200).description)
-        }
-    }
-
-    // MARK: Search terms
-
-    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
-        let context = XApContext(adAccountID: try await resolveAdAccountId()).rawValue
-        let campaignFilter = try OpenAPIValueContainer(unvalidatedValue: Int(campaignId))
-        var terms: [ASASearchTerm] = []
-        var offset = 0
-        while true {
-            let request = Components.Schemas.AppsReportingRequest(
-                pagination: .init(offset: offset, pageSize: Self.reportPageSize),
-                filters: [.init(field: "campaignId", _operator: .equals, value: campaignFilter)],
-                timeRange: .init(
-                    start: Self.day(startDate),
-                    end: Self.day(endDate),
-                    timeZone: .ortz,
-                    granularity: .daily
-                )
-            )
-            let page = try await call { api in
-                switch try await api.appsSearchTermReports(headers: .init(xApContext: context), body: .json(request)) {
-                case .ok(let ok): return try ok.body.json
-                case .badRequest(let r): throw AppleAdsError.status(400, try? r.body.json)
-                case .unauthorized: throw AppleAdsError.unauthorized
-                case .forbidden: throw AppleAdsError.forbidden
-                case .notFound(let r): throw AppleAdsError.status(404, try? r.body.json)
-                case .tooManyRequests: throw AppleAdsError.rateLimited
-                case .internalServerError(let r): throw AppleAdsError.status(500, try? r.body.json)
-                case .undocumented(let status, _): throw AppleAdsError.status(status)
-                }
+            // Apple documents a string, but tolerate a number like the campaign id.
+            if let text = try? c.decodeIfPresent(String.self, forKey: .promotedObjectId) {
+                promotedObjectId = text
+            } else {
+                promotedObjectId = (try? c.decodeIfPresent(Int64.self, forKey: .promotedObjectId)).flatMap { $0.map(String.init) }
             }
-            let rows = page.result?.rows ?? []
-            terms += rows.map(Self.searchTerm(from:))
-            offset += rows.count
-            let total = page.pagination?.totalCount ?? offset
-            if rows.count < Self.reportPageSize || offset >= total { return terms }
+            dailyBudget = try? c.decodeIfPresent(Budget.self, forKey: .dailyBudget)
         }
-    }
-
-    private static func searchTerm(from row: Components.Schemas.AppsSearchTermReportRow) -> ASASearchTerm {
-        let metrics = row.totalMetrics
-        let text = row.metadata?.searchTermText.flatMap { $0.isEmpty ? nil : $0 }
-        return ASASearchTerm(
-            text: text ?? lowVolumeText,
-            source: row.metadata?.searchTermSource ?? "AUTO",
-            impressions: Int(metrics?.impressions ?? 0),
-            taps: Int(metrics?.taps ?? 0),
-            ttr: metrics?.ttr ?? 0,
-            localSpend: metrics?.localSpend.flatMap { Double($0.amount) } ?? 0
-        )
     }
 
     /// `yyyy-MM-dd` in UTC: the dates callers pass are UTC day boundaries.
-    private static func day(_ date: Date) -> String {
+    static func day(_ date: Date) -> String {
         date.formatted(Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day())
     }
 
@@ -250,7 +139,7 @@ struct AppleAdsPlatformClient: AppleSearchAdsClientProtocol {
 
     /// Runs one API call on the session's client and turns every failure,
     /// including client construction and the OAuth exchange, into `AppleAdsError`.
-    private func call<T: Sendable>(_ body: (AppleAdsAPI) async throws -> T) async throws -> T {
+    func call<T: Sendable>(_ body: (AppleAdsAPI) async throws -> T) async throws -> T {
         do {
             return try await body(try await session.client(for: credentials))
         } catch {

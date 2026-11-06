@@ -19,6 +19,11 @@ import type {
   CompetitorGapRow,
   KeywordOpportunity,
   LintFinding,
+  AppleAdsSyncStatus,
+  AppleAdsOverview,
+  AppleAdsKeywordRow,
+  AppleAdsBidIdeas,
+  AppleAdsDays,
 } from './types';
 
 export const BASE = '/api/v1';
@@ -27,6 +32,23 @@ export class ApiError extends Error {
   constructor(public status: number, public body: string) {
     super(`API ${status}: ${body}`);
   }
+}
+
+// Vapor error bodies are `{"error":true,"reason":"…"}`.
+export function apiReason(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { reason?: unknown };
+    if (typeof parsed.reason === 'string' && parsed.reason) return parsed.reason;
+  } catch {
+    // Not JSON: fall through to the raw text.
+  }
+  return body || 'Apple Ads request failed.';
+}
+
+/** Readable copy for any thrown error: the server's reason when there is one. */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) return apiReason(err.body);
+  return err instanceof Error ? err.message : String(err);
 }
 
 // ── 401 hook (M2.4) ──────────────────────────────────────────────
@@ -236,6 +258,18 @@ export const putASASettings = (body: {
 }) => apiFetch<ASAStatus>('/settings/asa', { method: 'PUT', body: JSON.stringify(body) });
 export const getASAAccounts = () => apiFetch<ASAAdAccount[]>('/settings/asa/accounts');
 export const deleteASASettings = () => apiFetch<void>('/settings/asa', { method: 'DELETE' });
+
+// Apple Ads area ---------------------------------------------------
+// The read endpoints answer 409 when Apple Ads isn't connected.
+export const getAppleAdsSyncStatus = () => apiFetch<AppleAdsSyncStatus>('/apple-ads/sync-status');
+export const syncAppleAdsNow = () =>
+  apiFetch<AppleAdsSyncStatus>('/apple-ads/sync', { method: 'POST' });
+export const getAppleAdsOverview = (appId: string, days: AppleAdsDays) =>
+  apiFetch<AppleAdsOverview>(`/apple-ads/overview?appId=${encodeURIComponent(appId)}&days=${days}`);
+export const getAppleAdsKeywords = (appId: string, days: AppleAdsDays) =>
+  apiFetch<AppleAdsKeywordRow[]>(`/apple-ads/keywords?appId=${encodeURIComponent(appId)}&days=${days}`);
+export const getAppleAdsBidIdeas = (appId: string, days: AppleAdsDays) =>
+  apiFetch<AppleAdsBidIdeas>(`/apple-ads/bid-ideas?appId=${encodeURIComponent(appId)}&days=${days}`);
 
 // Charts -----------------------------------------------------------
 export const getChartPositions = () =>

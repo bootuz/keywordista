@@ -5,81 +5,60 @@ import Testing
 
 @Suite("KeywordSuggestionService")
 struct KeywordSuggestionServiceTests {
+    private static let creds = ASACredentials(clientId: "c", clientSecret: "j", orgId: nil)
+
+    private static func service(
+        asa: ASACredentials? = creds,
+        keywords: [Keyword],
+        mirror: InMemoryAppleAdsDataRepository
+    ) -> KeywordSuggestionService {
+        KeywordSuggestionService(
+            settings: StubSettingsService(asa: asa),
+            keywordRepo: InMemoryKeywordRepository(keywords),
+            rankCheckRepo: InMemoryRankCheckRepository(),
+            mirror: mirror,
+            today: { "2026-11-06" }
+        )
+    }
+
     @Test("returns empty response when ASA credentials are not configured")
     func empty_whenNoCreds() async throws {
-        let service = KeywordSuggestionService(
-            settings: StubSettingsService(asa: nil),
-            keywordRepo: InMemoryKeywordRepository([]),
-            rankCheckRepo: InMemoryRankCheckRepository(),
-            makeClient: { _ in FailingASAClient() },
-            now: { Date(timeIntervalSince1970: 0) },
-            logger: Logger(label: "t")
-        )
-        let result = try await service.suggest(seedKeywordId: UUID())
+        let result = try await Self.service(asa: nil, keywords: [], mirror: InMemoryAppleAdsDataRepository())
+            .suggest(seedKeywordId: UUID())
         #expect(result.rows.isEmpty)
         #expect(result.anonymized == nil)
     }
 
-    @Test("returns empty response when no campaign serves the seed's storefront")
+    @Test("returns empty response when no search terms come from the seed's storefront")
     func empty_whenNoMatchingCampaign() async throws {
         let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
-        let service = KeywordSuggestionService(
-            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
-            keywordRepo: InMemoryKeywordRepository([seed]),
-            rankCheckRepo: InMemoryRankCheckRepository(),
-            makeClient: { _ in
-                StubASAClient(
-                    campaigns: [ASACampaign(id: 1, name: "JP-only", countriesOrRegions: ["JP"], displayStatus: "RUNNING")],
-                    searchTermsByCampaign: [:]
-                )
-            },
-            now: { Date(timeIntervalSince1970: 1_700_000_000) },
-            logger: Logger(label: "t")
-        )
-        let result = try await service.suggest(seedKeywordId: seed.id!)
-        #expect(result.rows.isEmpty, "no US campaign → no suggestions for a US seed")
+        let mirror = InMemoryAppleAdsDataRepository()
+        try await AppleAdsMirrorSeed.synced(mirror, AppleAdsMirrorSeed.searchTerms([
+            ("flashcards jp", "JP", 1, 100, 10, "AUTO"),
+        ]))
+        let result = try await Self.service(keywords: [seed], mirror: mirror).suggest(seedKeywordId: seed.id!)
+        #expect(result.rows.isEmpty, "only JP terms → no suggestions for a US seed")
         #expect(result.anonymized == nil)
     }
 
-    @Test("filters to seed-related terms, dedupes across campaigns, marks alreadyTracked")
-    func happyPath() async throws {
+    @Test("reads the synced search terms: filters to seed-related terms, dedupes across campaigns, marks alreadyTracked")
+    func suggestionServiceReadsMirror() async throws {
         let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
         let trackedAlready = Keyword(id: UUID(), term: "anki flashcards", countryCode: "us")
         let untracked = "best flashcards 2026"
+        let mirror = InMemoryAppleAdsDataRepository()
+        try await AppleAdsMirrorSeed.synced(mirror, AppleAdsMirrorSeed.searchTerms([
+            ("anki flashcards", "US", 1, 100, 10, "AUTO"),
+            (untracked, "US", 1, 50, 5, "AUTO"),
+            // Should be filtered out — no token overlap with "flashcards".
+            ("tiktok video maker", "US", 1, 999, 0, "AUTO"),
+            // Same term in two campaigns → must dedupe with sums.
+            ("anki flashcards", "US", 2, 50, 5, "AUTO"),
+            // Another storefront's row for the same term doesn't count.
+            ("anki flashcards", "DE", 1, 7000, 70, "AUTO"),
+        ]))
 
-        let service = KeywordSuggestionService(
-            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
-            keywordRepo: InMemoryKeywordRepository([seed, trackedAlready]),
-            rankCheckRepo: InMemoryRankCheckRepository(),
-            makeClient: { _ in
-                StubASAClient(
-                    campaigns: [
-                        ASACampaign(id: 1, name: "US-A", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
-                        ASACampaign(id: 2, name: "US-B", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
-                    ],
-                    searchTermsByCampaign: [
-                        1: [
-                            ASASearchTerm(text: "anki flashcards", source: "AUTO",
-                                          impressions: 100, taps: 10, ttr: 0.10, localSpend: 5),
-                            ASASearchTerm(text: untracked, source: "AUTO",
-                                          impressions: 50, taps: 5, ttr: 0.10, localSpend: 3),
-                            // Should be filtered out — no token overlap with "flashcards".
-                            ASASearchTerm(text: "tiktok video maker", source: "AUTO",
-                                          impressions: 999, taps: 0, ttr: 0, localSpend: 0),
-                        ],
-                        2: [
-                            // Same term in two campaigns → must dedupe with sums.
-                            ASASearchTerm(text: "anki flashcards", source: "AUTO",
-                                          impressions: 50, taps: 5, ttr: 0.10, localSpend: 2),
-                        ],
-                    ]
-                )
-            },
-            now: { Date(timeIntervalSince1970: 1_700_000_000) },
-            logger: Logger(label: "t")
-        )
-
-        let result = try await service.suggest(seedKeywordId: seed.id!)
+        let result = try await Self.service(keywords: [seed, trackedAlready], mirror: mirror).suggest(seedKeywordId: seed.id!)
         let rows = result.rows
 
         #expect(rows.count == 2, "irrelevant 'tiktok' filtered out, dupe collapsed")
@@ -101,39 +80,18 @@ struct KeywordSuggestionServiceTests {
         // Real ASA shape: seed = "flashcard maker" (two tokens). The user's
         // broad-match auctions surface "best flashcard maker" — a row that
         // shares the seed's two tokens but isn't a substring of either side.
-        // The pre-fix substring filter dropped these silently; the
-        // token-overlap rule keeps them.
         let seed = Keyword(id: UUID(), term: "flashcard maker", countryCode: "us")
+        let mirror = InMemoryAppleAdsDataRepository()
+        try await AppleAdsMirrorSeed.synced(mirror, AppleAdsMirrorSeed.searchTerms([
+            // Kept: shares both seed tokens, Jaccard 2/3.
+            ("best flashcard maker", "US", 1, 30, 3, "AUTO"),
+            // Kept: shares the long "flashcard" token.
+            ("anki flashcard app", "US", 1, 20, 2, "AUTO"),
+            // Dropped: no shared tokens.
+            ("spaced repetition app", "US", 1, 100, 0, "AUTO"),
+        ]))
 
-        let service = KeywordSuggestionService(
-            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
-            keywordRepo: InMemoryKeywordRepository([seed]),
-            rankCheckRepo: InMemoryRankCheckRepository(),
-            makeClient: { _ in
-                StubASAClient(
-                    campaigns: [
-                        ASACampaign(id: 1, name: "US-A", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
-                    ],
-                    searchTermsByCampaign: [
-                        1: [
-                            // Kept: shares both seed tokens, Jaccard 2/3.
-                            ASASearchTerm(text: "best flashcard maker", source: "AUTO",
-                                          impressions: 30, taps: 3, ttr: 0.10, localSpend: 2),
-                            // Kept: shares the long "flashcard" token.
-                            ASASearchTerm(text: "anki flashcard app", source: "AUTO",
-                                          impressions: 20, taps: 2, ttr: 0.10, localSpend: 1),
-                            // Dropped: no shared tokens.
-                            ASASearchTerm(text: "spaced repetition app", source: "AUTO",
-                                          impressions: 100, taps: 0, ttr: 0, localSpend: 0),
-                        ],
-                    ]
-                )
-            },
-            now: { Date(timeIntervalSince1970: 1_700_000_000) },
-            logger: Logger(label: "t")
-        )
-
-        let result = try await service.suggest(seedKeywordId: seed.id!)
+        let result = try await Self.service(keywords: [seed], mirror: mirror).suggest(seedKeywordId: seed.id!)
         let terms = result.rows.map(\.term)
         #expect(terms.contains("best flashcard maker"))
         #expect(terms.contains("anki flashcard app"))
@@ -145,45 +103,19 @@ struct KeywordSuggestionServiceTests {
 
     @Test("aggregates LOW_VOLUME placeholder rows into the anonymized summary")
     func lowVolume_aggregated() async throws {
-        // Reproduces the user's actual GB campaign shape: two campaigns,
-        // each emitting a LOW_VOLUME row plus one real row. Before the
-        // fix, the substring filter dropped both LOW_VOLUME rows AND any
-        // real row that didn't contain the seed.
+        // Two campaigns, each emitting a LOW_VOLUME row plus one real row.
         let seed = Keyword(id: UUID(), term: "anki", countryCode: "gb")
+        let mirror = InMemoryAppleAdsDataRepository()
+        try await AppleAdsMirrorSeed.synced(mirror, AppleAdsMirrorSeed.searchTerms([
+            ("LOW_VOLUME", "GB", 1, 20, 0, "AUTO"),
+            // Real "anki" exact-match row: visible signal.
+            ("anki", "GB", 1, 49, 4, "TARGETED"),
+            ("LOW_VOLUME", "GB", 2, 4, 0, "AUTO"),
+        ]))
 
-        let service = KeywordSuggestionService(
-            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
-            keywordRepo: InMemoryKeywordRepository([seed]),
-            rankCheckRepo: InMemoryRankCheckRepository(),
-            makeClient: { _ in
-                StubASAClient(
-                    campaigns: [
-                        ASACampaign(id: 1, name: "anki-EXACT", countriesOrRegions: ["GB"], displayStatus: "RUNNING"),
-                        ASACampaign(id: 2, name: "flashcard-BROAD", countriesOrRegions: ["GB"], displayStatus: "RUNNING"),
-                    ],
-                    searchTermsByCampaign: [
-                        1: [
-                            ASASearchTerm(text: "LOW_VOLUME", source: "AUTO",
-                                          impressions: 20, taps: 0, ttr: 0, localSpend: 1),
-                            // Real "anki" exact-match row: visible signal.
-                            ASASearchTerm(text: "anki", source: "TARGETED",
-                                          impressions: 49, taps: 4, ttr: 0.08, localSpend: 4),
-                        ],
-                        2: [
-                            ASASearchTerm(text: "LOW_VOLUME", source: "AUTO",
-                                          impressions: 4, taps: 0, ttr: 0, localSpend: 1),
-                        ],
-                    ]
-                )
-            },
-            now: { Date(timeIntervalSince1970: 1_700_000_000) },
-            logger: Logger(label: "t")
-        )
+        let result = try await Self.service(keywords: [seed], mirror: mirror).suggest(seedKeywordId: seed.id!)
 
-        let result = try await service.suggest(seedKeywordId: seed.id!)
-
-        // Anonymized totals match the user's CSV: 20 + 4 = 24 impressions
-        // across 2 campaign × match-type combos.
+        // 20 + 4 = 24 impressions across 2 campaign × ad group sources.
         #expect(result.anonymized != nil)
         #expect(result.anonymized?.impressions == 24)
         #expect(result.anonymized?.taps == 0)
@@ -193,6 +125,35 @@ struct KeywordSuggestionServiceTests {
         #expect(result.rows.count == 1)
         #expect(result.rows.first?.term == "anki")
         #expect(result.rows.first?.impressions == 49)
+    }
+
+    @Test("rows older than 30 days before the newest synced day are left out")
+    func onlyLast30Days() async throws {
+        let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
+        let mirror = InMemoryAppleAdsDataRepository()
+        var snapshot = AppleAdsMirrorSeed.searchTerms([("flashcards app", "US", 1, 100, 10, "AUTO")])
+        snapshot.searchTermDays += AppleAdsMirrorSeed.searchTerms([("flashcards old", "US", 1, 100, 10, "AUTO")], date: "2026-10-06").searchTermDays
+        try await AppleAdsMirrorSeed.synced(mirror, snapshot)
+        let result = try await Self.service(keywords: [seed], mirror: mirror).suggest(seedKeywordId: seed.id!)
+        #expect(result.rows.map(\.term) == ["flashcards app"])
+    }
+
+    @Test("before any sync there are no suggestions")
+    func emptyBeforeFirstSync() async throws {
+        let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
+        let result = try await Self.service(keywords: [seed], mirror: InMemoryAppleAdsDataRepository()).suggest(seedKeywordId: seed.id!)
+        #expect(result.rows.isEmpty)
+    }
+
+    @Test("a failed last sync with nothing synced surfaces the sync's error")
+    func failedLastSyncWithoutDataThrowsSyncFailed() async throws {
+        let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
+        let mirror = InMemoryAppleAdsDataRepository()
+        await AppleAdsMirrorSeed.failedRun(mirror, error: "Apple Ads returned HTTP 500.")
+        await #expect(throws: AppleAdsError.syncFailed("Apple Ads returned HTTP 500.")) {
+            _ = try await Self.service(keywords: [seed], mirror: mirror).suggest(seedKeywordId: seed.id!)
+        }
+        #expect(AppleAdsError.syncFailed("x").description == "The last Apple Ads sync failed: x")
     }
 
     // MARK: - Pure-function coverage for the relevance helpers
@@ -250,72 +211,4 @@ private actor StubSettingsService: SettingsServiceProtocol {
     func getASACredentials() async throws -> ASACredentials? { asa }
     func setASACredentials(_ creds: ASACredentials) async throws {}
     func clearASACredentials() async throws {}
-}
-
-private actor StubASAClient: AppleSearchAdsClientProtocol {
-    let campaigns: [ASACampaign]
-    let searchTermsByCampaign: [Int64: [ASASearchTerm]]
-
-    init(campaigns: [ASACampaign], searchTermsByCampaign: [Int64: [ASASearchTerm]]) {
-        self.campaigns = campaigns
-        self.searchTermsByCampaign = searchTermsByCampaign
-    }
-
-    func listCampaigns() async throws -> [ASACampaign] { campaigns }
-
-    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
-        searchTermsByCampaign[campaignId] ?? []
-    }
-}
-
-extension KeywordSuggestionServiceTests {
-    @Test("when every campaign's report fails, the error surfaces instead of empty suggestions")
-    func allReportsFailingThrows() async throws {
-        let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
-        let service = KeywordSuggestionService(
-            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
-            keywordRepo: InMemoryKeywordRepository([seed]),
-            rankCheckRepo: InMemoryRankCheckRepository(),
-            makeClient: { _ in ReportsFailingASAClient() },
-            now: { Date(timeIntervalSince1970: 1_700_000_000) },
-            logger: Logger(label: "t")
-        )
-        await #expect(throws: AppleAdsError.unreadableResponse("x")) { _ = try await service.suggest(seedKeywordId: seed.id!) }
-    }
-
-    @Test("one failing campaign still returns the others' suggestions")
-    func oneReportFailingIsTolerated() async throws {
-        let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
-        let service = KeywordSuggestionService(
-            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
-            keywordRepo: InMemoryKeywordRepository([seed]),
-            rankCheckRepo: InMemoryRankCheckRepository(),
-            makeClient: { _ in ReportsFailingASAClient(failing: [1]) },
-            now: { Date(timeIntervalSince1970: 1_700_000_000) },
-            logger: Logger(label: "t")
-        )
-        let result = try await service.suggest(seedKeywordId: seed.id!)
-        #expect(result.rows.map(\.term) == ["flashcards app"])
-    }
-}
-
-private struct ReportsFailingASAClient: AppleSearchAdsClientProtocol {
-    var failing: Set<Int64> = [1, 2]
-    func listCampaigns() async throws -> [ASACampaign] {
-        [ASACampaign(id: 1, name: "US-A", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
-         ASACampaign(id: 2, name: "US-B", countriesOrRegions: ["US"], displayStatus: "RUNNING")]
-    }
-    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
-        if failing.contains(campaignId) { throw AppleAdsError.unreadableResponse("x") }
-        return [.init(text: "flashcards app", source: "AUTO", impressions: 500, taps: 10, ttr: 0.02, localSpend: 0)]
-    }
-}
-
-private struct FailingASAClient: AppleSearchAdsClientProtocol {
-    func listCampaigns() async throws -> [ASACampaign] {
-        throw AppleAdsError.unauthorized
-    }
-    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
-        throw AppleAdsError.unauthorized
-    }
 }

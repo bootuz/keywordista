@@ -129,7 +129,7 @@ Cutting a signed + notarized DMG: see [`.github/RELEASING.md`](.github/RELEASING
 
 ## API surface
 
-Everything under `/api/v1`. No auth, `127.0.0.1`-only. Five categories: **apps**, **keywords**, **dashboard**, **charts**, **settings**.
+Everything under `/api/v1`. No auth, `127.0.0.1`-only. Six categories: **apps**, **keywords**, **dashboard**, **charts**, **apple ads**, **settings**.
 
 <details>
 <summary>Full endpoint table</summary>
@@ -152,6 +152,10 @@ Everything under `/api/v1`. No auth, `127.0.0.1`-only. Five categories: **apps**
 | `GET` | `/chart-positions` | Currently-charted snapshot rows |
 | `GET` | `/chart-events?since=&limit=` | Append-only watchdog activity feed (SPA polls this) |
 | `POST` | `/charts/refresh` | Kick the chart watchdog immediately |
+| `GET` | `/apple-ads/overview?appId=&days=7\|30` | Spend, installs, CPI and campaigns vs the previous period, from synced data |
+| `GET` | `/apple-ads/keywords?appId=&days=` | Bid keywords with paid results next to organic rank |
+| `GET` | `/apple-ads/bid-ideas?appId=&days=` | Converting search terms, Apple's suggestions, wasted spend |
+| `POST` / `GET` | `/apple-ads/sync`, `/apple-ads/sync-status` | Start a sync now (202); read the running state and last run |
 | `GET` | `/settings/{asc,asa}` | Read App Store Connect / Apple Ads credential status |
 | `GET` | `/settings/asa/accounts` | Ad accounts the stored Apple Ads credentials can reach |
 | `PUT`/`DELETE` | `/settings/{asc,asa}` | Update / clear those credentials |

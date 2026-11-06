@@ -99,12 +99,19 @@ When adding a new service:
 
 ### Apple Ads (Platform API v1)
 
-`Clients/AppleAds/` wraps Apple's `AppleAdsClient` package (`apple-ads-platform-api-swift`, pinned exact) behind `AppleSearchAdsClientProtocol`, so the suggestion, popularity and opportunity services never see v1 types.
+`Clients/AppleAds/` wraps Apple's `AppleAdsClient` package (`apple-ads-platform-api-swift`, pinned exact). `AppleAdsPlatformClient` resolves the ad account and lists accounts; `AppleAdsReportingClient` (`AppleAdsReportingClientProtocol`) holds the reads the sync makes. Nothing outside the folder sees v1 types.
 - `AppleAdsSession` (an actor on `Application`, created in `configure.swift`) owns one live client per credential set, runs its `ServiceLifecycle` service, and shuts the old one down when credentials change. Build clients through it (`req.appleAdsClient(for:)`), never directly: each `AppleAdsClient` holds an HTTP client that must be shut down.
-- Every data call needs `X-AP-Context: adAccountId=…`. `AppleAdsPlatformClient.resolveAdAccountId()` uses the saved `asa.adAccountId`, else the only ACL account, else the one matching the legacy v5 `orgId`, else throws `adAccountSelectionRequired` so the user picks in Settings. Never guess between accounts.
+- Every data call needs `X-AP-Context: adAccountId=…`. `AppleAdsPlatformClient.resolveAdAccountId()` uses the saved `asa.adAccountId`, else the only ACL account, else the one matching the legacy v5 `orgId`, else throws `adAccountSelectionRequired` so the user picks in Apple Ads → Setup. Never guess between accounts.
 - `AppleAdsRetryMiddleware` retries 429s only for GETs and `…/query` POSTs. Writes must surface the 429.
-- Failures become `AppleAdsError`, whose `description` is user-facing copy. It conforms to `AbortError` as a 502 (never 401, because the SPA sends every 401 to `/login`), so controllers just let it escape. The suggestion and popularity services tolerate one failing campaign report but rethrow when all of them fail, so an empty result never hides an Apple error.
-- Disconnecting Apple Ads (`DELETE /settings/asa`) shuts the session down; changing the client ID drops the stored ad account.
+- Failures become `AppleAdsError`, whose `description` is user-facing copy. It conforms to `AbortError` as a 502 (never 401, because the SPA sends every 401 to `/login`), so controllers just let it escape.
+- Disconnecting Apple Ads (`DELETE /settings/asa`) cancels a running sync, deletes all synced data, then shuts the session down. Saving a different client ID or ad account also deletes the synced data; changing the client ID drops the stored ad account.
+
+**The local mirror.** Every Apple Ads screen, plus keyword suggestions and the opportunity score's popularity, reads tables the sync fills (`Models/AppleAdsMirror.swift`, `AppleAdsDataRepositoryProtocol`); nothing calls Apple per request.
+- It's a mirror, not append-only like `RankCheck`: Apple revises recent days, so each sync replaces its date window in one transaction. Rows are scoped by `ad_account_id`, and a sync for a new account deletes the old account's rows first.
+- `AppleAdsSyncService` fetches everything, checks for cancellation, then writes. The first sync (or one after more than 7 days without a success) copies 90 days; later ones refresh the last 7. Popularity and keyword ideas are best-effort; any other failed report fails the run and keeps the previous data. Each run is a row in `apple_ads_sync_runs`, with readable error copy.
+- `AppleAdsSyncCoordinator` (an actor on `Application`) runs at most one sync, **outside the queue worker**, so a long backfill never holds up keyword refreshes. It runs daily at 04:30 UTC (`AppleAdsSyncScheduler`) and from `POST /apple-ads/sync`. Purges call `cancelAndWait()` first so a late write can't undo them.
+- `AppleAdsMirrorReader` is the shared read rule: before any successful sync, a failed latest run throws `AppleAdsError.syncFailed` (an empty result would read as "no data"); with no run at all, results are empty.
+- `AppleAdsInsightsService` serves `GET /apple-ads/overview|keywords|bid-ideas?appId=&days=7|30`. Periods end at the newest synced day, ratios use tap installs, and under 50 taps a row is `lowData`. Only campaigns promoting the chosen watched app count. The endpoints answer 409 without credentials and are open to every signed-in member; credentials stay admin-only.
 - The generated `Client` type clashes with Vapor's; refer to it as `AppleAdsAPI` (a typealias in a Vapor-free file).
 
 ### Database driver routing (load-bearing)
@@ -125,7 +132,7 @@ Adding an env var means updating the manifest, `docs/env-vars.md`, and keeping `
 
 `configure.swift` pins `app.queues.configuration.workerCount = 1`. Don't bump this. Comment in the file explains: parallel workers cause both iTunes 504s (rate-limit) *and* SQLite "database is locked" errors. Polite ~1 req/sec to iTunes is the contract with Apple.
 
-Three scheduled jobs (UTC), spaced so they don't stack:
+Three scheduled jobs (UTC), spaced so they don't stack, plus the Apple Ads sync at 04:30, which the scheduler starts but which runs outside the queue worker (see Apple Ads above):
 - `DailyRefreshScheduler` @ 03:00 — refresh every tracked keyword.
 - `DailyMetadataSnapshotJob` @ 03:30 — snapshot App Store metadata for own + competitor apps (feeds compare/optimizer). Skipped entirely when `KEYWORDISTA_METADATA_SNAPSHOT_ENABLED=false`.
 - `RefreshChartsScheduler` @ 04:00 — chart-position watchdog (4h after Apple's midnight-PT chart refresh).
@@ -140,7 +147,7 @@ The orphan-job sweeper at boot (`UPDATE _jobs SET state='completed' WHERE state=
 
 `routes.swift` registers the product controllers differently per mode:
 - **Local mode: no auth.** The server binds `127.0.0.1`, so anything that could reach it can already read `db.sqlite` directly. Every `/api/v1` controller is mounted bare.
-- **Server mode:** product routes (`/apps`, `/competitors`, `/keywords`, `/dashboard`, `/charts`, metadata) sit behind `AuthMiddleware` (a `keywordista_session` cookie with a rolling TTL). `/settings/*`, `/users/*`, and `/admin` (backup) are also behind `RoleMiddleware.requireAdmin()`.
+- **Server mode:** product routes (`/apps`, `/competitors`, `/keywords`, `/dashboard`, `/charts`, `/apple-ads`, metadata) sit behind `AuthMiddleware` (a `keywordista_session` cookie with a rolling TTL). `/settings/*`, `/users/*`, and `/admin` (backup) are also behind `RoleMiddleware.requireAdmin()`.
 - **Always public:** `/health`, `/api/v1/version`, `/api/v1/auth/*` (`/auth/state` tells the SPA which mode it's in so it can hide auth UI locally).
 
 The first admin is created with the `keywordista createsuperuser` CLI command, or seeded from `KEYWORDISTA_ADMIN_EMAIL` + `KEYWORDISTA_ADMIN_PASSWORD_HASH` when the users table is empty. There's no web setup endpoint (it was removed on purpose). Teammates join via invite links. When adding a new controller, register it in **both** branches of the `switch manifest.mode` and pick the right group. Record `creatorUserID` from `req.auth.get(User.self)?.id`, which is nil in local mode.
@@ -154,7 +161,7 @@ Svelte 5 + Tailwind + Vite. `svelte-check` is strict — fix warnings before pus
 - `web/src/lib/stores.ts` — central state + the `reconcile()` polling loop that coordinates with the server queue. Read its comments before touching refresh-status logic.
 - `web/src/lib/countries.ts` — Apple's 175-territory list, source of truth for storefronts on both sides of the wire.
 - `web/src/lib/chartEvents.ts` — polling loop that fires `new Notification(...)` for chart watchdog events.
-- `web/src/lib/router.ts` — hash-based `svelte-spa-router` map. Pages: Dashboard (`/`), Compare, Gaps, Charts, Optimizer, plus server-mode auth pages (login, bootstrap, invite, users admin). Use the `ROUTES` constants rather than path strings.
+- `web/src/lib/router.ts` — hash-based `svelte-spa-router` map. Pages: Dashboard (`/`), Compare, Gaps, Charts, Optimizer, Apple Ads (`/apple-ads/:tab`), plus server-mode auth pages (login, bootstrap, invite, users admin). Use the `ROUTES` constants rather than path strings.
 - `web/src/lib/authStore.ts` / `auth.ts` — holds the `/auth/state` result (mode, signed-in user).
 - `web/src/lib/api.ts` + `types.ts` — the typed API client; keep in sync with server DTOs. `apiFetch`'s 401 hook sends the user to `/login` (except for `/auth/*` calls, so the login form can show "invalid credentials").
 - `web/src/components/` — flat directory; no nested component folders by convention.

@@ -29,7 +29,9 @@
 
   // router.location is the reactive current path (v5 runes API), e.g. "/gaps".
   const path = $derived(router.location);
-  const isActive = (href: string): boolean => path === href;
+  // Apple Ads has one entry for its four tab paths.
+  const isActive = (href: string): boolean =>
+    path === href || (href.startsWith('/apple-ads') && path.startsWith('/apple-ads'));
 
   // Same unread-events badge the old header showed, now on the Charts item.
   const chartsUnread = $derived.by(() => {
@@ -59,6 +61,7 @@
     { href: ROUTES.compare, label: 'Compare' },
     { href: ROUTES.gaps, label: 'Gaps' },
     { href: ROUTES.optimizer, label: 'Optimizer' },
+    { href: ROUTES.appleAds(), label: 'Apple Ads' },
   ];
 
   // Shared classes for a sidebar row (nav link or meta button).
@@ -116,6 +119,8 @@
               <rect x="3" y="3" width="7" height="18" /><rect x="14" y="3" width="7" height="18" />
             {:else if item.label === 'Gaps'}
               <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="0.5" fill="currentColor" />
+            {:else if item.label === 'Apple Ads'}
+              <path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" />
             {:else}
               <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z" />
             {/if}

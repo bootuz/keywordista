@@ -104,3 +104,104 @@ actor InMemoryTopResultSnapshotRepository: TopResultSnapshotRepositoryProtocol {
             .sorted(by: { $0.position < $1.position })
     }
 }
+
+/// In-memory Apple Ads mirror with the same replace/purge semantics as the
+/// Fluent repository (window replace, account scoping, latest-week popularity).
+actor InMemoryAppleAdsDataRepository: AppleAdsDataRepositoryProtocol {
+    private var campaignsByAccount: [Int64: [AppleAdsCampaignInfo]] = [:]
+    private var keywordsByAccount: [Int64: [AppleAdsKeywordInfo]] = [:]
+    private var ideasByAccount: [Int64: [AppleAdsKeywordIdea]] = [:]
+    private var campaignDayRows: [(Int64, AppleAdsCampaignDay)] = []
+    private var keywordDayRows: [(Int64, AppleAdsKeywordDay)] = []
+    private var searchTermDayRows: [(Int64, AppleAdsSearchTermDay)] = []
+    private var popularityRows: [(Int64, AppleAdsTermPopularity)] = []
+    private var runs: [AppleAdsSyncRun] = []
+    /// Set to make the next `replace` throw, to exercise failure paths.
+    var failNextReplace: (any Error)?
+
+    init() {}
+
+    func setFailNextReplace(_ error: (any Error)?) { failNextReplace = error }
+
+    func replace(adAccountId: Int64, from: String, to: String, with s: AppleAdsSnapshot) async throws {
+        if let error = failNextReplace { failNextReplace = nil; throw error }
+        campaignsByAccount[adAccountId] = s.campaigns
+        keywordsByAccount[adAccountId] = s.keywords
+        let kept = (ideasByAccount[adAccountId] ?? []).filter {
+            s.failedIdeaScopes.contains(AppleAdsIdeaScope(appStoreId: $0.appStoreId, country: $0.country.uppercased()))
+        }
+        ideasByAccount[adAccountId] = kept + s.ideas
+        let inWindow: (String) -> Bool = { $0 >= from && $0 <= to }
+        campaignDayRows.removeAll { $0.0 == adAccountId && inWindow($0.1.date) }
+        keywordDayRows.removeAll { $0.0 == adAccountId && inWindow($0.1.date) }
+        searchTermDayRows.removeAll { $0.0 == adAccountId && inWindow($0.1.date) }
+        campaignDayRows += s.campaignDays.map { (adAccountId, $0) }
+        keywordDayRows += s.keywordDays.map { (adAccountId, $0) }
+        searchTermDayRows += s.searchTermDays.map { (adAccountId, $0) }
+        for p in s.popularity {
+            popularityRows.removeAll { $0.0 == adAccountId && $0.1.term == p.term && $0.1.country == p.country && $0.1.genre == p.genre && $0.1.week == p.week }
+            popularityRows.append((adAccountId, p))
+        }
+    }
+
+    func purgeAll() async throws {
+        campaignsByAccount = [:]; keywordsByAccount = [:]; ideasByAccount = [:]
+        campaignDayRows = []; keywordDayRows = []; searchTermDayRows = []; popularityRows = []; runs = []
+    }
+
+    func purge(exceptAdAccountId keep: Int64) async throws {
+        campaignsByAccount = campaignsByAccount.filter { $0.key == keep }
+        keywordsByAccount = keywordsByAccount.filter { $0.key == keep }
+        ideasByAccount = ideasByAccount.filter { $0.key == keep }
+        campaignDayRows.removeAll { $0.0 != keep }
+        keywordDayRows.removeAll { $0.0 != keep }
+        searchTermDayRows.removeAll { $0.0 != keep }
+        popularityRows.removeAll { $0.0 != keep }
+        runs.removeAll { $0.adAccountId != nil && $0.adAccountId != keep }
+    }
+
+    func campaigns(adAccountId: Int64) async throws -> [AppleAdsCampaignInfo] { campaignsByAccount[adAccountId] ?? [] }
+    func keywords(adAccountId: Int64) async throws -> [AppleAdsKeywordInfo] { keywordsByAccount[adAccountId] ?? [] }
+    func campaignDays(adAccountId: Int64, from: String, to: String) async throws -> [AppleAdsCampaignDay] {
+        campaignDayRows.filter { $0.0 == adAccountId && $0.1.date >= from && $0.1.date <= to }.map(\.1)
+    }
+    func keywordDays(adAccountId: Int64, from: String, to: String) async throws -> [AppleAdsKeywordDay] {
+        keywordDayRows.filter { $0.0 == adAccountId && $0.1.date >= from && $0.1.date <= to }.map(\.1)
+    }
+    func searchTermDays(adAccountId: Int64, from: String, to: String) async throws -> [AppleAdsSearchTermDay] {
+        searchTermDayRows.filter { $0.0 == adAccountId && $0.1.date >= from && $0.1.date <= to }.map(\.1)
+    }
+    func popularity(terms: Set<String>, countries: Set<String>) async throws -> [AppleAdsTermPopularity] {
+        var latest: [String: AppleAdsTermPopularity] = [:]
+        for (_, p) in popularityRows where terms.contains(p.term) && countries.contains(p.country) {
+            let key = "\(p.term)\u{0}\(p.country)"
+            if let seen = latest[key], seen.week >= p.week { continue }
+            latest[key] = p
+        }
+        return Array(latest.values)
+    }
+    func ideas(adAccountId: Int64, appStoreId: Int64) async throws -> [AppleAdsKeywordIdea] {
+        (ideasByAccount[adAccountId] ?? []).filter { $0.appStoreId == appStoreId }
+    }
+    func latestDate(adAccountId: Int64) async throws -> String? {
+        campaignDayRows.filter { $0.0 == adAccountId }.map(\.1.date).max()
+    }
+
+    func startRun(trigger: AppleAdsSyncTrigger) async throws -> AppleAdsSyncRun {
+        let run = AppleAdsSyncRun(id: UUID(), adAccountId: nil, trigger: trigger, outcome: .running, startedAt: Date(), finishedAt: nil, fromDate: nil, toDate: nil, error: nil)
+        runs.append(run)
+        return run
+    }
+    func finishRun(id: UUID, adAccountId: Int64?, outcome: AppleAdsSyncOutcome, fromDate: String?, toDate: String?, error: String?) async throws {
+        guard let i = runs.firstIndex(where: { $0.id == id }) else { return }
+        let r = runs[i]
+        runs[i] = AppleAdsSyncRun(id: r.id, adAccountId: adAccountId, trigger: r.trigger, outcome: outcome, startedAt: r.startedAt, finishedAt: Date(), fromDate: fromDate, toDate: toDate, error: error)
+    }
+    func latestRun() async throws -> AppleAdsSyncRun? { runs.last }
+    func lastSuccessfulRun(adAccountId: Int64?) async throws -> AppleAdsSyncRun? {
+        runs.last { (adAccountId == nil || $0.adAccountId == adAccountId) && $0.outcome == .succeeded }
+    }
+    /// Test hook: seed a finished run directly.
+    func seedRun(_ run: AppleAdsSyncRun) { runs.append(run) }
+    var allRuns: [AppleAdsSyncRun] { runs }
+}

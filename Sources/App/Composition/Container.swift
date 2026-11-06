@@ -63,37 +63,49 @@ extension Request {
         )
     }
 
+    func appleAdsDataRepository() -> any AppleAdsDataRepositoryProtocol {
+        FluentAppleAdsDataRepository(db: db)
+    }
+
+    func appleAdsInsightsService() -> AppleAdsInsightsService {
+        let coordinator = application.appleAdsSyncCoordinator
+        return AppleAdsInsightsService(
+            repository: appleAdsDataRepository(),
+            watchedApps: FluentWatchedAppRepository(db: db),
+            keywords: FluentKeywordRepository(db: db),
+            rankChecks: FluentRankCheckRepository(db: db),
+            syncRunning: { await coordinator.isRunning },
+            today: Request.utcToday
+        )
+    }
+
     func appleAdsClient(for credentials: ASACredentials) -> AppleAdsPlatformClient {
         AppleAdsPlatformClient(credentials: credentials, session: application.appleAdsSession, logger: logger)
     }
 
     func keywordSuggestionService() -> any KeywordSuggestionServiceProtocol {
-        let theLogger = logger
-        let session = application.appleAdsSession
-        return KeywordSuggestionService(
+        KeywordSuggestionService(
             settings: settingsService(),
             keywordRepo: FluentKeywordRepository(db: db),
             rankCheckRepo: FluentRankCheckRepository(db: db),
-            makeClient: { creds in
-                AppleAdsPlatformClient(credentials: creds, session: session, logger: theLogger)
-            },
-            now: { Date() },
-            logger: logger
+            mirror: appleAdsDataRepository(),
+            today: Self.utcToday
         )
     }
 
     func keywordPopularityService() -> any KeywordPopularityServiceProtocol {
-        let theLogger = logger
-        let session = application.appleAdsSession
-        return KeywordPopularityService(
+        KeywordPopularityService(
             settings: settingsService(),
             keywordRepo: FluentKeywordRepository(db: db),
-            makeClient: { creds in
-                AppleAdsPlatformClient(credentials: creds, session: session, logger: theLogger)
-            },
-            now: { Date() },
-            logger: logger
+            mirror: appleAdsDataRepository(),
+            today: Self.utcToday
         )
+    }
+
+    /// Today as `yyyy-MM-dd` in UTC: the fallback end of a report window
+    /// when nothing has synced yet.
+    static let utcToday: @Sendable () -> String = {
+        Date().formatted(Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day())
     }
 
     func opportunityService() -> any OpportunityServiceProtocol {
@@ -155,6 +167,36 @@ extension Request {
 }
 
 extension Application {
+    /// Runs Apple Ads syncs one at a time. Set once in `configure`.
+    var appleAdsSyncCoordinator: AppleAdsSyncCoordinator {
+        get {
+            guard let coordinator = storage[AppleAdsSyncCoordinatorKey.self] else {
+                fatalError("appleAdsSyncCoordinator not configured; set it in configure()")
+            }
+            return coordinator
+        }
+        set { storage[AppleAdsSyncCoordinatorKey.self] = newValue }
+    }
+
+    private struct AppleAdsSyncCoordinatorKey: StorageKey {
+        typealias Value = AppleAdsSyncCoordinator
+    }
+
+    /// Production sync wiring, job-scoped (no Request).
+    func makeAppleAdsSyncService() -> any AppleAdsSyncServiceProtocol {
+        let session = appleAdsSession
+        let log = logger
+        return AppleAdsSyncService(
+            settings: SettingsService(repository: FluentSettingsRepository(db: db), secretBox: requireSecretBox()),
+            repository: FluentAppleAdsDataRepository(db: db),
+            watchedApps: FluentWatchedAppRepository(db: db),
+            keywords: FluentKeywordRepository(db: db),
+            makeClient: { creds in AppleAdsPlatformClient(credentials: creds, session: session, logger: log) },
+            today: Request.utcToday,
+            logger: log
+        )
+    }
+
     /// The process's Apple Ads client owner. Set once in `configure` (not
     /// lazily) so two concurrent first requests can't each create a session
     /// and each pay an OAuth exchange.

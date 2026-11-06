@@ -363,3 +363,104 @@ export interface UserListItem {
   createdAt: string;
   lastLoginAt: string | null;
 }
+
+// ── Apple Ads area ───────────────────────────────────────────────────────
+// Everything below comes from the local copy the daily sync keeps; nothing
+// here calls Apple per request. Apple's IDs travel as strings. Vapor omits
+// nil optionals, so optional fields can arrive absent rather than null.
+
+export interface AppleAdsMetrics {
+  impressions: number;
+  taps: number;
+  tapInstalls: number;
+  /** Tap plus view-through installs. CPI and CR use tap installs only. */
+  totalInstalls: number;
+  spend: number;
+  cpt?: number | null;
+  cpi?: number | null;
+  ttr?: number | null;
+  cr?: number | null;
+  /** Under 50 taps: show the numbers muted, never hide them. */
+  lowData: boolean;
+}
+
+export interface AppleAdsSyncRun {
+  id: string;
+  trigger: 'scheduled' | 'manual';
+  outcome: 'running' | 'succeeded' | 'failed';
+  startedAt: string;
+  finishedAt?: string | null;
+  fromDate?: string | null;
+  toDate?: string | null;
+  error?: string | null;
+}
+
+export interface AppleAdsSyncStatus {
+  running: boolean;
+  lastRun?: AppleAdsSyncRun | null;
+  lastSuccessAt?: string | null;
+}
+
+export interface AppleAdsCampaignSummary {
+  id: string;
+  name: string;
+  status: string;
+  metrics: AppleAdsMetrics;
+  previous: AppleAdsMetrics;
+}
+
+export interface AppleAdsDailyPoint {
+  date: string;
+  spend: number;
+  tapInstalls: number;
+}
+
+export interface AppleAdsOverview {
+  currency?: string | null;
+  from: string;
+  to: string;
+  previousFrom: string;
+  previousTo: string;
+  totals: AppleAdsMetrics;
+  previousTotals: AppleAdsMetrics;
+  campaigns: AppleAdsCampaignSummary[];
+  daily: AppleAdsDailyPoint[];
+  otherAppsCampaignCount: number;
+  lastSync: AppleAdsSyncStatus;
+}
+
+export interface AppleAdsKeywordRow {
+  keywordId: string;
+  text: string;
+  matchType: string;
+  status: string;
+  campaignName: string;
+  country: string;
+  bid?: number | null;
+  suggestedBid?: number | null;
+  currency?: string | null;
+  metrics: AppleAdsMetrics;
+  organicRank?: number | null;
+  trackedKeywordId?: string | null;
+  alreadyRanksWell: boolean;
+}
+
+export interface AppleAdsIdea {
+  term: string;
+  country: string;
+  metrics?: AppleAdsMetrics | null;
+  /** Apple's search popularity, 1–100. */
+  popularity?: number | null;
+  organicRank?: number | null;
+  difficulty?: number | null;
+  trackedKeywordId?: string | null;
+}
+
+export interface AppleAdsBidIdeas {
+  currency?: string | null;
+  converted: AppleAdsIdea[];
+  suggestions: AppleAdsIdea[];
+  wasted: AppleAdsIdea[];
+}
+
+export type AppleAdsDays = 7 | 30;

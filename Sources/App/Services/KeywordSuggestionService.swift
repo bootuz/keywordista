@@ -2,18 +2,17 @@ import Foundation
 import Vapor
 
 // Discovers candidate keywords for a seed keyword + country by mining the
-// user's Apple Search Ads search-terms reports. Apple's public API doesn't
-// expose a generic "given seed X return related terms" endpoint — the only
-// way to get real keyword discovery data is via search-terms reports tied
-// to the user's running campaign(s).
+// user's Apple Ads search-term reports. Apple's public API doesn't expose a
+// generic "given seed X return related terms" endpoint — the only way to get
+// real keyword discovery data is via search-term reports tied to the user's
+// running campaign(s). Reads the local mirror the daily sync keeps.
 //
 // Flow:
 //   1. Resolve seed → (term, countryCode) by loading the keyword row.
-//   2. Fetch ASA campaigns; keep those targeting `countryCode`.
-//   3. For each matching campaign, pull last 30d of search-terms.
-//   4. Partition rows: aggregate Apple's LOW_VOLUME privacy placeholders
+//   2. Read the last 30 synced days of search terms in that storefront.
+//   3. Partition rows: aggregate Apple's LOW_VOLUME privacy placeholders
 //      into a single summary; score remaining rows for seed-relevance.
-//   5. Dedup, join against tracked keywords, sort by relevance then impressions.
+//   4. Dedup, join against tracked keywords, sort by relevance then impressions.
 
 protocol KeywordSuggestionServiceProtocol: Sendable {
     func suggest(seedKeywordId: UUID) async throws -> SuggestionsResponse
@@ -55,9 +54,8 @@ struct KeywordSuggestionService: KeywordSuggestionServiceProtocol {
     let settings: any SettingsServiceProtocol
     let keywordRepo: any KeywordRepositoryProtocol
     let rankCheckRepo: any RankCheckRepositoryProtocol
-    let makeClient: @Sendable (ASACredentials) -> any AppleSearchAdsClientProtocol
-    let now: @Sendable () -> Date
-    let logger: Logger
+    let mirror: any AppleAdsDataRepositoryProtocol
+    let today: @Sendable () -> String
 
     static let reportWindowDays = 30
 
@@ -77,87 +75,51 @@ struct KeywordSuggestionService: KeywordSuggestionServiceProtocol {
 
     func suggest(seedKeywordId: UUID) async throws -> SuggestionsResponse {
         // (1) ASA not configured → empty (controller treats as 200 + []).
-        guard let creds = try await settings.getASACredentials() else { return Self.empty }
+        guard try await settings.getASACredentials() != nil else { return Self.empty }
 
-        // (2) Resolve seed.
+        // Resolve seed.
         guard let seed = try await keywordRepo.find(id: seedKeywordId) else { return Self.empty }
         let seedTerm = seed.term.lowercased()
         let seedTokens = Self.tokenize(seedTerm)
         let country = seed.countryCode.uppercased()
 
-        let client = makeClient(creds)
-
-        // (3) Find campaigns serving this country.
-        let allCampaigns = try await client.listCampaigns()
-        let relevant = allCampaigns.filter { c in
-            c.countriesOrRegions.contains(country)
-        }
-        if relevant.isEmpty { return Self.empty }
-
-        // (4) Pull search-terms reports in parallel; collect all terms.
-        let endDate = now()
-        let startDate = endDate.addingTimeInterval(-TimeInterval(Self.reportWindowDays * 86_400))
-
-        var all: [ASASearchTerm] = []
-        var failures: [any Error] = []
-        try await withThrowingTaskGroup(of: Result<[ASASearchTerm], any Error>.self) { group in
-            for campaign in relevant {
-                let c = client
-                let id = campaign.id
-                let log = logger
-                group.addTask {
-                    do {
-                        return .success(try await c.searchTermsReport(
-                            campaignId: id,
-                            startDate: startDate,
-                            endDate: endDate
-                        ))
-                    } catch {
-                        // Don't let one bad campaign kill the whole panel —
-                        // log and continue. The UI shows what we did get.
-                        // (The comment said "log" since the beginning; this
-                        // is where the actual log call lives now — previously
-                        // the catch swallowed errors silently, which made
-                        // ASA-side failures invisible.)
-                        log.warning("ASA searchterms failed: campaign=\(id) error=\(error)")
-                        return .failure(error)
-                    }
-                }
-            }
-            for try await result in group {
-                switch result {
-                case .success(let rows): all.append(contentsOf: rows)
-                case .failure(let error): failures.append(error)
-                }
-            }
-        }
-        // If every report failed, an empty panel would read as "no related
-        // terms"; surface the reason instead (it reaches the UI as a 502).
-        if failures.count == relevant.count, let first = failures.first { throw first }
+        // (2) The seed storefront's synced search terms.
+        let reader = AppleAdsMirrorReader(repository: mirror, today: today)
+        guard let account = try await reader.syncedAccount() else { return Self.empty }
+        let all = try await reader.recentSearchTerms(account: account, days: Self.reportWindowDays)
+            .filter { $0.country.uppercased() == country }
         if all.isEmpty { return Self.empty }
 
-        // (5a) Partition out Apple's anonymized placeholder rows BEFORE the
+        // (3a) Partition out Apple's anonymized placeholder rows BEFORE the
         //      relevance filter. "LOW_VOLUME" never lexically matches a
         //      real seed, so the filter would drop these silently and the
         //      user would lose the signal that the campaign is producing
-        //      impressions at all. Match case-insensitively to be safe;
-        //      Apple has historically used the upper-case literal.
-        var lowVolumeRows: [ASASearchTerm] = []
-        var realRows: [ASASearchTerm] = []
+        //      impressions at all.
+        var lowVolumeRows: [AppleAdsSearchTermDay] = []
+        var termRows: [ASASearchTerm] = []
         for row in all {
-            if row.text.uppercased() == "LOW_VOLUME" {
+            if AppleAdsMirrorReader.isLowVolume(row.term) {
                 lowVolumeRows.append(row)
             } else {
-                realRows.append(row)
+                termRows.append(ASASearchTerm(
+                    text: row.term, source: row.source,
+                    impressions: row.metrics.impressions, taps: row.metrics.taps,
+                    ttr: row.metrics.impressions > 0 ? Double(row.metrics.taps) / Double(row.metrics.impressions) : 0,
+                    localSpend: row.metrics.spend
+                ))
             }
         }
+        // A source is one campaign × ad group × keyword; daily rows of the
+        // same source count once.
+        struct Source: Hashable { let campaign: Int64; let adGroup: Int64; let keyword: Int64? }
         let anonymized: AnonymizedSummary? = lowVolumeRows.isEmpty ? nil : AnonymizedSummary(
-            impressions: lowVolumeRows.reduce(0) { $0 + $1.impressions },
-            taps: lowVolumeRows.reduce(0) { $0 + $1.taps },
-            sourceCount: lowVolumeRows.count
+            impressions: lowVolumeRows.reduce(0) { $0 + $1.metrics.impressions },
+            taps: lowVolumeRows.reduce(0) { $0 + $1.metrics.taps },
+            sourceCount: Set(lowVolumeRows.map { Source(campaign: $0.campaignId, adGroup: $0.adGroupId, keyword: $0.keywordId) }).count
         )
+        let realRows = termRows
 
-        // (5b) Token-based relevance. Substring containment is too strict
+        // (3b) Token-based relevance. Substring containment is too strict
         //      for ASA broad/search-match auctions, which routinely surface
         //      long-tail queries that share *some* but not all words with
         //      the seed (e.g. seed "flashcard maker" → "best flashcard
@@ -173,7 +135,7 @@ struct KeywordSuggestionService: KeywordSuggestionServiceProtocol {
             return keep ? (row, jaccard) : nil
         }
 
-        // Multiple campaigns may report the same term — collapse to one row.
+        // Several campaigns and days report the same term — collapse to one row.
         // Carry the highest relevance seen for the term so the final sort
         // doesn't get confused by ordering of duplicates.
         struct Accum { var row: ASASearchTerm; var score: Double }
@@ -287,4 +249,14 @@ struct KeywordSuggestionService: KeywordSuggestionServiceProtocol {
         let hasLong = intersection.contains { $0.count >= minSharedTokenLength }
         return (jaccard, hasLong)
     }
+}
+
+/// One search term's totals inside the suggestion service.
+struct ASASearchTerm: Sendable, Equatable {
+    let text: String           // The query the user typed
+    let source: String         // "AUTO" (Search Match) | "TARGETED" | …
+    let impressions: Int
+    let taps: Int
+    let ttr: Double            // 0…1
+    let localSpend: Double     // in the campaign's currency
 }
