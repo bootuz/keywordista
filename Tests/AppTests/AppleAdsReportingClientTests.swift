@@ -10,7 +10,7 @@ struct AppleAdsReportingClientTests {
 
     private static func makeClient(_ transport: StubAppleAdsTransport) -> (AppleAdsPlatformClient, AppleAdsSession) {
         let session = AppleAdsSession(logger: Logger(label: "t")) { _ in
-            try await makeTestAppleAdsClient(transport: transport, middleware: [AppleAdsRetryMiddleware(sleep: { _ in })])
+            try await makeTestAppleAdsClient(transport: transport, middleware: AppleAdsSession.standardMiddleware(retrySleep: { _ in }))
         }
         let creds = ASACredentials(clientId: "SEARCHADS.t", clientSecret: "jwt", orgId: nil, adAccountId: "42")
         return (AppleAdsPlatformClient(credentials: creds, session: session, logger: Logger(label: "t")), session)
@@ -141,6 +141,74 @@ struct AppleAdsReportingClientTests {
         #expect(byField["promotedObjectId"] == ["99"])
         #expect(byField["promotedObjectType"] == ["APPSTORE_APP"])
         #expect(byField["countriesOrRegions"] == ["US"])
+        await session.shutdown()
+    }
+
+    /// Apple's real 400 body: wrapped in `error`, with the useful reason in
+    /// `details`. The generated client documents a bare error object here, so
+    /// it can't decode this.
+    private static let unsupportedFilter400 = #"{"error":{"code":"VALIDATION_ERROR","message":"Request validation failed","details":[{"code":"INVALID_FIELD_ATTRIBUTE","message":"Filters contain unsupported fields campaignId","field":"filters"}]}}"#
+
+    @Test("a wrapped 400 on campaignDays carries Apple's detail message")
+    func campaignDaysSurfacesWrapped400Reason() async throws {
+        let transport = StubAppleAdsTransport([.init(status: .badRequest, json: Self.unsupportedFilter400)])
+        let (client, session) = Self.makeClient(transport)
+        await #expect {
+            _ = try await client.campaignDays(campaignIds: [1], from: "2026-10-01", to: "2026-10-03")
+        } throws: { error in
+            (error as? AppleAdsError)?.description == "Apple Ads returned HTTP 400: Filters contain unsupported fields campaignId"
+        }
+        await session.shutdown()
+    }
+
+    @Test("a wrapped 400 on keywordDays carries Apple's detail message")
+    func keywordDaysSurfacesWrapped400Reason() async throws {
+        let transport = StubAppleAdsTransport([.init(status: .badRequest, json: Self.unsupportedFilter400)])
+        let (client, session) = Self.makeClient(transport)
+        await #expect {
+            _ = try await client.keywordDays(campaignId: 1, from: "2026-10-01", to: "2026-10-01")
+        } throws: { error in
+            (error as? AppleAdsError)?.description.contains("Filters contain unsupported fields campaignId") == true
+        }
+        await session.shutdown()
+    }
+
+    @Test("a wrapped error without details falls back to its message")
+    func wrappedErrorWithoutDetailsUsesMessage() async throws {
+        let transport = StubAppleAdsTransport([
+            .init(status: .internalServerError, json: #"{"error":{"code":"INTERNAL_ERROR","message":"Something broke on our side"}}"#),
+        ])
+        let (client, session) = Self.makeClient(transport)
+        await #expect(throws: AppleAdsError.http(status: 500, message: "Something broke on our side")) {
+            _ = try await client.campaignDays(campaignIds: [1], from: "2026-10-01", to: "2026-10-01")
+        }
+        await session.shutdown()
+    }
+
+    @Test("a 400 with an unreadable body still names the status")
+    func unparseable400NamesStatus() async throws {
+        let transport = StubAppleAdsTransport([.init(status: .badRequest, json: "<html>Bad Request</html>")])
+        let (client, session) = Self.makeClient(transport)
+        await #expect {
+            _ = try await client.campaignDays(campaignIds: [1], from: "2026-10-01", to: "2026-10-01")
+        } throws: { error in
+            (error as? AppleAdsError)?.description == "Apple Ads returned HTTP 400."
+        }
+        await session.shutdown()
+    }
+
+    @Test("429s still reach the retry policy, and give up as rate-limited")
+    func persistent429IsRateLimited() async throws {
+        let rateLimited = StubAppleAdsTransport.Canned(
+            status: .tooManyRequests,
+            json: #"{"error":{"code":"RATE_LIMIT","message":"Too many requests"}}"#
+        )
+        let transport = StubAppleAdsTransport(Array(repeating: rateLimited, count: AppleAdsRetryMiddleware.maxAttempts))
+        let (client, session) = Self.makeClient(transport)
+        await #expect(throws: AppleAdsError.rateLimited) {
+            _ = try await client.campaignDays(campaignIds: [1], from: "2026-10-01", to: "2026-10-01")
+        }
+        #expect(await transport.requests.count == AppleAdsRetryMiddleware.maxAttempts)
         await session.shutdown()
     }
 

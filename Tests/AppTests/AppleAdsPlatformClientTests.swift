@@ -16,7 +16,7 @@ struct AppleAdsPlatformClientTests {
         ASACredentials(clientId: "SEARCHADS.t", clientSecret: "jwt", orgId: orgId, adAccountId: adAccountId)
     }
 
-    /// Client wired to `transport`, with the production retry policy but no real sleeping.
+    /// Client wired to `transport`, with the production middleware but no real sleeping.
     private static func makeClient(
         _ transport: StubAppleAdsTransport,
         creds: ASACredentials = creds()
@@ -24,7 +24,7 @@ struct AppleAdsPlatformClientTests {
         let session = AppleAdsSession(logger: Logger(label: "t")) { _ in
             try await makeTestAppleAdsClient(
                 transport: transport,
-                middleware: [AppleAdsRetryMiddleware(sleep: { _ in })]
+                middleware: AppleAdsSession.standardMiddleware(retrySleep: { _ in })
             )
         }
         return (AppleAdsPlatformClient(credentials: creds, session: session, logger: Logger(label: "t")), session)

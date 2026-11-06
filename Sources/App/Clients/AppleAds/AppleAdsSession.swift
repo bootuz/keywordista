@@ -44,11 +44,21 @@ actor AppleAdsSession {
         self.makeClient = makeClient
     }
 
+    /// The middleware every production request runs through. Tests build
+    /// their clients from this list too, with `retrySleep` stubbed out.
+    static func standardMiddleware(
+        retrySleep: @escaping AppleAdsRetryMiddleware.Sleep = { try await Task.sleep(for: $0) }
+    ) -> [any ClientMiddleware] {
+        // Order matters: the retry policy wraps the error reader, so each
+        // attempt's 429 reaches the retry loop (the reader passes 429s through).
+        [AppleAdsRetryMiddleware(sleep: retrySleep), AppleAdsErrorBodyMiddleware()]
+    }
+
     /// Production wiring: the stored client-secret JWT, plus `middleware`
-    /// (the 429 retry policy) on every request.
+    /// on every request.
     static func live(
         logger: Logger,
-        middleware: [any ClientMiddleware] = [AppleAdsRetryMiddleware()]
+        middleware: [any ClientMiddleware] = standardMiddleware()
     ) -> AppleAdsSession {
         AppleAdsSession(logger: logger) { creds in
             try await AppleAdsClient(configuration: .init(

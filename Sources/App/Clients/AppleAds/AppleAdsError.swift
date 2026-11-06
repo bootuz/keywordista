@@ -63,11 +63,16 @@ enum AppleAdsError: Error, Equatable, CustomStringConvertible {
 
     /// Maps a non-2xx status (and Apple's error body, when it decoded) to a case.
     static func status(_ code: Int, _ body: Components.Schemas._Error? = nil) -> AppleAdsError {
+        status(code, message: body?.message ?? body?.code ?? "")
+    }
+
+    /// Maps a non-2xx status and Apple's reason (empty when it gave none) to a case.
+    static func status(_ code: Int, message: String) -> AppleAdsError {
         switch code {
         case 401: return .unauthorized
         case 403: return .forbidden
         case 429: return .rateLimited
-        default: return .http(status: code, message: body?.message ?? body?.code ?? "")
+        default: return .http(status: code, message: message)
         }
     }
 
@@ -90,6 +95,8 @@ enum AppleAdsError: Error, Equatable, CustomStringConvertible {
             return .unreachable(String(describing: error))
         }
         if let auth = client.underlyingError as? AppleAdsAuthError { return .authFailed(auth.message) }
+        // `AppleAdsErrorBodyMiddleware` already read Apple's reason from the body.
+        if let mapped = client.underlyingError as? AppleAdsError { return mapped }
         if let response = client.response {
             let code = response.status.code
             if !(200..<300).contains(code) { return .status(code) }
