@@ -28,10 +28,10 @@ enum UpdateStatus: Equatable {
 //      skip and keeps the user in control of when the server restarts.
 //
 //   2. **Codesign verification before swap.** We refuse to apply a binary
-//      whose `codesign --verify` fails. Combined with the notarization
-//      done by the release-service.yml workflow, this means we'll only
-//      run a binary signed by our Developer ID — even if GitHub Releases
-//      were compromised, the bar is "obtain our cert," not "swap a URL."
+//      unless `codesign --verify` passes against a requirement pinned to
+//      our Developer ID team (see `releaseCodeRequirement`). Even if
+//      GitHub Releases were compromised, the bar is "obtain our cert,"
+//      not "swap a URL."
 //
 // All state mutations happen on the main actor so SwiftUI observation is
 // free of concurrency hazards.
@@ -148,7 +148,7 @@ final class UpdateChecker: ObservableObject {
             // 3. Verify codesign BEFORE touching the running service. If
             //    verification fails the running install stays put and
             //    the user just sees an error row.
-            try await verifyCodesign(of: extractedBinary)
+            try Self.verifyCodesign(of: extractedBinary)
 
             // 4. Stop the current service, atomically replace the
             //    service/ directory, restart. resolveBinary() in
@@ -317,10 +317,32 @@ final class UpdateChecker: ObservableObject {
         return stageDir
     }
 
-    private func verifyCodesign(of binary: URL) async throws {
+    /// Apple Developer team that signs `service-v*` release binaries
+    /// (release-service.yml, "Developer ID Application" identity).
+    /// Hardcoded like `repoOwner`: this updater only trusts releases
+    /// from this project.
+    nonisolated static let releaseTeamID = "KHNA6PF8QV"
+
+    /// Why a `-R` requirement: bare `codesign --verify` only proves *some*
+    /// valid signature exists, and the linker ad-hoc-signs every arm64
+    /// binary for free, so it would accept anything. This is Apple's
+    /// canonical Developer ID requirement (Developer ID CA intermediate +
+    /// Developer ID Application leaf) pinned to our team.
+    nonisolated static var releaseCodeRequirement: String {
+        "anchor apple generic"
+            + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+            + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+            + " and certificate leaf[subject.OU] = \"\(releaseTeamID)\""
+    }
+
+    nonisolated static func verifyCodesign(of binary: URL) throws {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        task.arguments = ["--verify", "--strict", "--verbose=1", binary.path]
+        task.arguments = [
+            "--verify", "--strict", "--verbose=1",
+            "-R=\(releaseCodeRequirement)",
+            binary.path,
+        ]
         let stderr = Pipe()
         task.standardError = stderr
         try task.run()
