@@ -152,7 +152,7 @@ Dev server proxies `/api` to `:8080` (see `vite.config.ts`). Production build em
 ## Architecture: menubar (`mac/`)
 
 `MenuBarExtra`-based SwiftUI app (`LSUIElement`) that manages **multiple instances**: the local backend plus any number of remote deployments. `AppCoordinator` in `KeywordistaApp.swift` owns the long-lived services. Key files in `mac/Sources/Keywordista/`:
-- `ServiceSupervisor.swift` — picks a free port in 8080–8090, spawns the server binary (local mode, `--hostname 127.0.0.1 --port <chosen>`), and writes `<dataDir>/runtime.json` with the base URL so the MCP server can find it. It prefers a downloaded `service/` in the data dir over the copy bundled in the `.app`. A crash only sets `.crashed`; there's no automatic restart (the menu's "Restart backend" is the only way back). Quit, SIGTERM and SIGINT stop the child via `AppShutdownDelegate`.
+- `ServiceSupervisor.swift` — picks a free port in 8080–8090, spawns the server binary (local mode, `--hostname 127.0.0.1 --port <chosen>`), and writes `<dataDir>/runtime.json` with the base URL so the MCP server can find it. It runs whichever is newer of a downloaded `service/` in the data dir and the copy bundled in the `.app`. After a crash it auto-restarts the child with backoff and an attempt cap (`RestartBackoff.swift`); only `stop()` exits are treated as intentional. Quit, SIGTERM and SIGINT stop the child via `AppShutdownDelegate`.
 - `Model/` — `Instance` (a `local` / `remote` sum type; the local instance has a fixed UUID), `InstanceStore` (persists `instances.json`), `InstanceLifecycle`.
 - `Health/` — `HealthCoordinator` keeps one `InstanceHealthMonitor` per instance, each polling `/health`.
 - `Provider/` — the PaaS abstraction used by the deploy wizard. Only `Render/` exists so far.
