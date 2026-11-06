@@ -41,7 +41,8 @@ actor ScriptedReportingClient: AppleAdsReportingClientProtocol {
 
     func configure(_ body: @Sendable (isolated ScriptedReportingClient) -> Void) { body(self) }
     func holdAtCampaigns() { holdNextFetch = true }
-    func release() { gate?.resume(); gate = nil; isHeld = false }
+    /// Lets a held fetch go, or cancels a hold the sync hasn't reached yet.
+    func release() { holdNextFetch = false; gate?.resume(); gate = nil; isHeld = false }
 
     func resolveAdAccountId() async throws -> Int64 {
         if let resolveError { throw resolveError }
@@ -51,7 +52,12 @@ actor ScriptedReportingClient: AppleAdsReportingClientProtocol {
         if holdNextFetch {
             holdNextFetch = false
             isHeld = true
-            await withCheckedContinuation { gate = $0 }
+            // Like a real request, a cancelled sync stops waiting.
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { gate = $0 }
+            } onCancel: {
+                Task { await self.release() }
+            }
         }
         return campaigns
     }

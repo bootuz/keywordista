@@ -75,6 +75,7 @@ func routes(_ app: Application, manifest: Manifest) throws {
         try api.register(collection: DashboardController())
         try api.register(collection: SettingsController())
         try api.register(collection: ChartsController())
+        try api.register(collection: AppleAdsController())
         // Backup endpoint (M1.11) — registered in both modes so the
         // cockpit's BackupDownloader (M5) has one code path that
         // works against local OR remote instances. In local mode
@@ -95,6 +96,9 @@ func routes(_ app: Application, manifest: Manifest) throws {
         try authenticated.register(collection: KeywordsController())
         try authenticated.register(collection: DashboardController())
         try authenticated.register(collection: ChartsController())
+        // Every member may view Apple Ads and press Sync now; credentials
+        // stay admin-only under SettingsController.
+        try authenticated.register(collection: AppleAdsController())
 
         // Admin-only: settings (ASC/ASA secret rotation) and user
         // management. RoleMiddleware composes AFTER AuthMiddleware,

@@ -63,6 +63,10 @@ extension Request {
         )
     }
 
+    func appleAdsDataRepository() -> any AppleAdsDataRepositoryProtocol {
+        FluentAppleAdsDataRepository(db: db)
+    }
+
     func appleAdsClient(for credentials: ASACredentials) -> AppleAdsPlatformClient {
         AppleAdsPlatformClient(credentials: credentials, session: application.appleAdsSession, logger: logger)
     }
@@ -155,6 +159,36 @@ extension Request {
 }
 
 extension Application {
+    /// Runs Apple Ads syncs one at a time. Set once in `configure`.
+    var appleAdsSyncCoordinator: AppleAdsSyncCoordinator {
+        get {
+            guard let coordinator = storage[AppleAdsSyncCoordinatorKey.self] else {
+                fatalError("appleAdsSyncCoordinator not configured; set it in configure()")
+            }
+            return coordinator
+        }
+        set { storage[AppleAdsSyncCoordinatorKey.self] = newValue }
+    }
+
+    private struct AppleAdsSyncCoordinatorKey: StorageKey {
+        typealias Value = AppleAdsSyncCoordinator
+    }
+
+    /// Production sync wiring, job-scoped (no Request).
+    func makeAppleAdsSyncService() -> any AppleAdsSyncServiceProtocol {
+        let session = appleAdsSession
+        let log = logger
+        return AppleAdsSyncService(
+            settings: SettingsService(repository: FluentSettingsRepository(db: db), secretBox: requireSecretBox()),
+            repository: FluentAppleAdsDataRepository(db: db),
+            watchedApps: FluentWatchedAppRepository(db: db),
+            keywords: FluentKeywordRepository(db: db),
+            makeClient: { creds in AppleAdsPlatformClient(credentials: creds, session: session, logger: log) },
+            today: { Date().formatted(Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day()) },
+            logger: log
+        )
+    }
+
     /// The process's Apple Ads client owner. Set once in `configure` (not
     /// lazily) so two concurrent first requests can't each create a session
     /// and each pay an OAuth exchange.
