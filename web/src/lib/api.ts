@@ -8,6 +8,7 @@ import type {
   QueueStatus,
   ASCStatus,
   ASAStatus,
+  ASAAdAccount,
   DeveloperKeywordsResponse,
   SuggestionsResponse,
   ChartPosition,
@@ -226,8 +227,14 @@ export const getKeywordSuggestions = (id: string) =>
   apiFetch<SuggestionsResponse>(`/keywords/${id}/suggestions`);
 
 export const getASASettings = () => apiFetch<ASAStatus>('/settings/asa');
-export const putASASettings = (body: { clientId: string; clientSecret?: string; orgId?: string }) =>
-  apiFetch<ASAStatus>('/settings/asa', { method: 'PUT', body: JSON.stringify(body) });
+// `adAccountId`: omit to keep the stored account, '' to go back to automatic.
+export const putASASettings = (body: {
+  clientId: string;
+  clientSecret?: string;
+  orgId?: string;
+  adAccountId?: string;
+}) => apiFetch<ASAStatus>('/settings/asa', { method: 'PUT', body: JSON.stringify(body) });
+export const getASAAccounts = () => apiFetch<ASAAdAccount[]>('/settings/asa/accounts');
 export const deleteASASettings = () => apiFetch<void>('/settings/asa', { method: 'DELETE' });
 
 // Charts -----------------------------------------------------------

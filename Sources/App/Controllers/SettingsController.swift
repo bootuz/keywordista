@@ -13,6 +13,7 @@ struct SettingsController: RouteCollection {
         settings.get("asa", use: getASA)
         settings.put("asa", use: putASA)
         settings.delete("asa", use: deleteASA)
+        settings.get("asa", "accounts", use: listASAAccounts)
     }
 
     // ── ASC ───────────────────────────────────────────────────────────────
@@ -119,6 +120,22 @@ struct SettingsController: RouteCollection {
                 ?? existing?.adAccountId
         ))
         return try await service.getASAStatus()
+    }
+
+    /// Ad accounts the stored credentials can reach, for the settings picker.
+    ///
+    /// Why Apple's failures map to 502 rather than their own status: the
+    /// SPA treats any 401 as "your Keywordista session expired" and sends
+    /// the user to /login, which is wrong when it's Apple rejecting the key.
+    @Sendable func listASAAccounts(req: Request) async throws -> [ASAAdAccount] {
+        guard let credentials = try await req.settingsService().getASACredentials() else {
+            throw Abort(.conflict, reason: "Connect Apple Ads first")
+        }
+        do {
+            return try await req.appleAdsClient(for: credentials).listAdAccounts()
+        } catch let failure as AppleAdsError {
+            throw Abort(.badGateway, reason: failure.description)
+        }
     }
 
     @Sendable func deleteASA(req: Request) async throws -> HTTPStatus {

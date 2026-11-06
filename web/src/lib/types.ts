@@ -212,8 +212,18 @@ export interface ASCStatus {
 export interface ASAStatus {
   clientId: string | null;
   orgId: string | null;
+  adAccountId: string | null;
   hasClientSecret: boolean;
   configured: boolean;
+}
+
+// An Apple Ads ad account the stored credentials can reach. IDs are
+// strings so JavaScript never rounds Apple's 64-bit IDs.
+export interface ASAAdAccount {
+  id: string;
+  name: string;
+  orgId: string;
+  roles: string[];
 }
 
 export interface RefreshResponse {

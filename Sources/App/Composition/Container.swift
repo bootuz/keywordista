@@ -63,6 +63,10 @@ extension Request {
         )
     }
 
+    func appleAdsClient(for credentials: ASACredentials) -> AppleAdsPlatformClient {
+        AppleAdsPlatformClient(credentials: credentials, session: application.appleAdsSession, logger: logger)
+    }
+
     func keywordSuggestionService() -> any KeywordSuggestionServiceProtocol {
         let theLogger = logger
         let session = application.appleAdsSession
