@@ -96,6 +96,8 @@ End users don't download these directly — the menubar app polls for `service-v
 
 The app's bundled fallback service binary is whatever was on `main` at the time the app DMG was built. After install, the menubar app upgrades to whatever `service-v*` is newer than its bundled fallback. So users always get the latest service eventually, even if they only ever download the .dmg once.
 
+The workflow stamps the bundled server with the newest stable `service-v*` tag reachable from the build commit, and both the bundle and each applied update carry a `keywordista-server.version` marker next to the binary. On launch the menubar app runs whichever of the two is newer (ties go to the bundle), so installing a newer DMG over an older downloaded update takes effect immediately.
+
 ## Dry-run testing
 
 The workflow also accepts a manual trigger via `workflow_dispatch` for testing without cutting a real release:

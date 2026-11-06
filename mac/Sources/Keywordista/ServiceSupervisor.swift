@@ -11,15 +11,10 @@ enum ServiceStatus: Equatable {
 
 // Owns the lifecycle of the Vapor server child process.
 //
-// Binary resolution order:
-//   1. ~/Library/Application Support/Keywordista/service/keywordista-server
-//      (a service update downloaded by the menubar app — 5d will populate
-//       this; the supervisor already prefers it so the update flow only has
-//       to drop the file and restart us)
-//   2. <Bundle>/Contents/Resources/keywordista-server (the version that
-//      shipped with the .app, used until an update is downloaded)
-//
-// The same fallback applies for the Public/ directory (the SPA assets).
+// Binary resolution: runs the newer of the downloaded service update
+// (~/Library/Application Support/Keywordista/service/) and the copy bundled
+// in the .app (Contents/Resources/). Binary and Public/ always come from the
+// same one. See "Binary / public-dir resolution" below for the rules.
 //
 // Port resolution: prefer 8080, fall back to 8081..8090 if it's busy. The
 // chosen port is published so HealthMonitor and the menu URL both follow.
@@ -72,14 +67,12 @@ final class ServiceSupervisor: ObservableObject {
     private func launch() {
         status = .starting
 
-        guard let binaryURL = resolveBinary() else {
-            status = .crashed(reason: "service binary not found in bundle or data dir")
+        guard let install = resolveServiceInstall() else {
+            status = .crashed(reason: "no complete service install (binary + Public/) in bundle or data dir")
             return
         }
-        guard let publicDir = resolvePublicDir() else {
-            status = .crashed(reason: "Public/ not found in bundle or data dir")
-            return
-        }
+        let binaryURL = install.binary
+        let publicDir = install.publicDir
         guard let chosenPort = resolveFreePort() else {
             let last = Self.preferredPort + Self.maxFallbackOffset
             status = .crashed(reason: "no free port in \(Self.preferredPort)–\(last); free one and re-launch")
@@ -264,29 +257,105 @@ final class ServiceSupervisor: ObservableObject {
     }
 
     // MARK: - Binary / public-dir resolution
+    //
+    // Two installs can exist side by side:
+    //   • downloaded — <dataDir>/service/, written by UpdateChecker when the
+    //     user applies a `service-v*` release
+    //   • bundled    — <Bundle>/Contents/Resources/, sealed into the .app by
+    //     build-dmg.sh / build-app.sh
+    //
+    // We run whichever is newer. Preferring the download unconditionally
+    // (the old behaviour) meant a freshly installed DMG with a newer server
+    // kept running a stale download until the next service release.
+    //
+    // Versions come from a marker file next to each binary rather than from
+    // the binary itself, because asking the binary means launching it.
+    // build-dmg.sh writes the bundle's marker from the same Version.swift
+    // literal the server reports at /api/v1/version; UpdateChecker writes the
+    // download's marker from the release tag it applied.
+    //
+    // Binary and Public/ always come from the same install: the SPA and the
+    // API it talks to ship as a pair, and mixing them risks a UI calling
+    // endpoints the running server doesn't have.
 
-    private func resolveBinary() -> URL? {
-        let downloaded = dataDir.appendingPathComponent("service/keywordista-server")
-        if FileManager.default.isExecutableFile(atPath: downloaded.path) {
-            return downloaded
-        }
-        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("keywordista-server"),
-           FileManager.default.isExecutableFile(atPath: bundled.path) {
-            return bundled
-        }
-        return nil
+    nonisolated static let versionMarkerName = "keywordista-server.version"
+
+    struct ServiceInstall: Equatable {
+        enum Source: Equatable { case downloaded, bundled }
+        let source: Source
+        let binary: URL
+        let publicDir: URL
+        /// nil when the marker is missing or unreadable.
+        let version: String?
     }
 
-    private func resolvePublicDir() -> URL? {
-        let downloaded = dataDir.appendingPathComponent("service/Public", isDirectory: true)
-        if FileManager.default.fileExists(atPath: downloaded.path) {
+    /// Picks which install to launch. Callers pass nil for an install whose
+    /// binary or Public/ is missing, so anything handed in here is runnable.
+    ///
+    /// A missing version ranks below every known one. The realistic source
+    /// of an unmarked install is a download applied by an app build that
+    /// predates markers, and every app build that has this code also ships a
+    /// marked bundle. Guessing "older" there is self-correcting: the bundled
+    /// server reports its own version, the updater re-offers anything newer,
+    /// and the re-applied download gets a marker.
+    ///
+    /// Ties go to the bundle. Its marker is the newest stable `service-v*`
+    /// tag reachable from the commit the DMG was built from, so it carries
+    /// at least that release's code and often unreleased fixes on top.
+    nonisolated static func chooseServiceInstall(
+        downloaded: ServiceInstall?,
+        bundled: ServiceInstall?
+    ) -> ServiceInstall? {
+        guard let downloaded else { return bundled }
+        guard let bundled else { return downloaded }
+        switch (downloaded.version, bundled.version) {
+        case let (d?, b?):
+            return UpdateChecker.compareSemver(d, b) == .orderedDescending ? downloaded : bundled
+        case (_?, nil):
             return downloaded
-        }
-        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("Public", isDirectory: true),
-           FileManager.default.fileExists(atPath: bundled.path) {
+        case (nil, _):
             return bundled
         }
-        return nil
+    }
+
+    /// Accepts only plain dotted integers. compareSemver silently drops
+    /// non-numeric parts, so "garbage" or "v0.7.0" would otherwise compare
+    /// as some arbitrary version instead of as unknown.
+    nonisolated static func parseVersionMarker(_ contents: String?) -> String? {
+        guard let trimmed = contents?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        let parts = trimmed.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func resolveServiceInstall() -> ServiceInstall? {
+        let downloaded = probeInstall(
+            source: .downloaded,
+            in: dataDir.appendingPathComponent("service", isDirectory: true)
+        )
+        let bundled = Bundle.main.resourceURL.flatMap { probeInstall(source: .bundled, in: $0) }
+        return Self.chooseServiceInstall(downloaded: downloaded, bundled: bundled)
+    }
+
+    private func probeInstall(source: ServiceInstall.Source, in dir: URL) -> ServiceInstall? {
+        let fm = FileManager.default
+        let binary = dir.appendingPathComponent("keywordista-server")
+        let publicDir = dir.appendingPathComponent("Public", isDirectory: true)
+        guard fm.isExecutableFile(atPath: binary.path),
+              fm.fileExists(atPath: publicDir.path) else { return nil }
+        let marker = try? String(
+            contentsOf: dir.appendingPathComponent(Self.versionMarkerName),
+            encoding: .utf8
+        )
+        return ServiceInstall(
+            source: source,
+            binary: binary,
+            publicDir: publicDir,
+            version: Self.parseVersionMarker(marker)
+        )
     }
 
     private func openAppending(_ url: URL) -> FileHandle? {
