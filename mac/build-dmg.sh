@@ -182,14 +182,10 @@ cp "$MAC_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/"
 # silences the occasional "damaged" warning on older systems.
 printf "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
-# App icon. Regenerated from mac/Resources/AppIcon.png on every release
-# build so a designer can swap the source PNG without touching anything
-# else. Skipped if the source isn't there yet (Finder shows the generic
-# .app icon as a fallback).
-if [ -f "$MAC_DIR/Resources/AppIcon.png" ]; then
-    "$MAC_DIR/generate-icon.sh"
-    cp "$MAC_DIR/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
-fi
+# App icon. Recompiled from mac/Resources/AppIcon.icon (Icon Composer) on
+# every release build: Assets.car for macOS 26+, AppIcon.icns for 15.
+"$MAC_DIR/generate-icon.sh"
+cp "$MAC_DIR/Resources/Assets.car" "$MAC_DIR/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
 
 # ── 3. Code-sign the .app (inside-out) ────────────────────────────────────
 

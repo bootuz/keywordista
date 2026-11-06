@@ -8,10 +8,13 @@
     <string>Keywordista</string>
     <key>CFBundleExecutable</key>
     <string>Keywordista</string>
-    <!-- AppIcon.icns is generated from AppIcon.png at build time; see
-         mac/generate-icon.sh. The .icns extension is implied — don't
-         include it in this string. -->
+    <!-- Both icon keys come from AppIcon.icon via actool at build time
+         (mac/generate-icon.sh). CFBundleIconName points macOS 26+ at the
+         layered icon in Assets.car; CFBundleIconFile is the flat .icns
+         fallback macOS 15 uses (extension implied, don't add it). -->
     <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.bootuz.keywordista</string>

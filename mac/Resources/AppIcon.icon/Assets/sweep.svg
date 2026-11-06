@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="416.8" y1="156.5" x2="793.9" y2="275.4">
+      <stop offset="0" stop-color="#5EF0C2" stop-opacity="0"/>
+      <stop offset="1" stop-color="#5EF0C2" stop-opacity="0.65"/>
+    </linearGradient>
+  </defs>
+  <path d="M512 512 L416.8 156.5 A368 368 0 0 1 793.9 275.4 Z" fill="url(#sweep)"/>
+  <circle cx="655" cy="308" r="72" fill="#5EF0C2" opacity="0.2"/>
+  <circle cx="297" cy="636" r="25" fill="#5EF0C2" opacity="0.5"/>
+  <circle cx="576" cy="624" r="23" fill="#5EF0C2" opacity="0.45"/>
+</svg>

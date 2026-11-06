@@ -20,9 +20,10 @@ web/.vite/
 # Menubar app build outputs
 mac/Keywordista.app/
 mac/BundledService/
-# Generated app icon — derived from mac/Resources/AppIcon.png by
-# mac/generate-icon.sh on every build. Only the source PNG is committed.
+# Generated app icon — compiled from mac/Resources/AppIcon.icon by
+# mac/generate-icon.sh on every build. Only the .icon is committed.
 mac/Resources/AppIcon.icns
+mac/Resources/Assets.car
 
 # Release artifacts
 releases/
