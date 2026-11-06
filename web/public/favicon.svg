@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="184 184 656 656">
+  <!-- Same drawing as src/components/RadarMark.svelte. The media query
+       follows the browser's light/dark setting, which is what the tab
+       strip behind the favicon uses. -->
+  <style>
+    svg { color: #0d9488; }
+    @media (prefers-color-scheme: dark) { svg { color: #5EF0C2; } }
+  </style>
+  <defs>
+    <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="429" y1="203" x2="757" y2="306">
+      <stop offset="0" stop-color="currentColor" stop-opacity="0"/>
+      <stop offset="1" stop-color="currentColor" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="currentColor" stroke-opacity="0.4" stroke-width="18">
+    <circle cx="512" cy="512" r="112"/>
+    <circle cx="512" cy="512" r="216"/>
+    <circle cx="512" cy="512" r="318"/>
+  </g>
+  <path d="M512 512 L429.2 202.9 A320 320 0 0 1 757.1 306.3 Z" fill="url(#sweep)"/>
+  <path d="M512 512 L757.1 306.3" stroke="currentColor" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="325" cy="620" r="24" fill="currentColor" opacity="0.5"/>
+  <circle cx="568" cy="609" r="22" fill="currentColor" opacity="0.45"/>
+  <circle cx="636" cy="335" r="62" fill="currentColor" opacity="0.2"/>
+  <circle cx="636" cy="335" r="34" fill="currentColor"/>
+  <circle cx="512" cy="512" r="30" fill="currentColor"/>
+</svg>

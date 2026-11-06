@@ -239,7 +239,10 @@ struct KeywordistaApp: App {
         MenuBarExtra {
             MenuBarContent(coord: coord)
         } label: {
-            Image(systemName: iconName(for: coord.updates.status))
+            Image(nsImage: MenuBarIcon.image(for: MenuBarIcon.variant(
+                health: coord.health.rollupStatus,
+                hasUpdateNotification: coord.updates.status.hasNotification
+            )))
         }
 
         WindowGroup(id: "deploy-flow") {
@@ -266,22 +269,6 @@ struct KeywordistaApp: App {
         .windowResizability(.contentSize)
     }
 
-    /// Menubar icon — three modes. Pre-M3 had only the magnifying
-    /// glass + badged version for service updates; v2 uses
-    /// HealthCoordinator's rollupStatus to surface "any instance is
-    /// down" without opening the menu.
-    private func iconName(for status: UpdateStatus) -> String {
-        switch coord.health.rollupStatus {
-        case .green:
-            return status.hasNotification
-                ? "magnifyingglass.circle.fill"
-                : "magnifyingglass"
-        case .yellow:
-            return "magnifyingglass.circle"
-        case .red:
-            return "exclamationmark.magnifyingglass"
-        }
-    }
 }
 
 /// Thin view that pulls the openWindow environment value and wires

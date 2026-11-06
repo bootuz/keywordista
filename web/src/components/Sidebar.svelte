@@ -11,6 +11,7 @@
   import { clearAuthState, currentUser, serverMode } from '../lib/authStore';
   import { chartEvents, lastVisited, startChartEventPoll } from '../lib/chartEvents';
   import SettingsPanel from './SettingsPanel.svelte';
+  import RadarMark from './RadarMark.svelte';
 
   // The unread badge lives here now, so the poll must run app-wide (not just
   // on the dashboard). startChartEventPoll is idempotent — safe if something
@@ -79,6 +80,7 @@
   <!-- Brand + collapse toggle -->
   <div class="flex h-12 items-center gap-2 border-b border-zinc-200 px-3 dark:border-zinc-800">
     {#if !collapsed}
+      <RadarMark size={20} />
       <span class="truncate text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
         Keywordista
       </span>

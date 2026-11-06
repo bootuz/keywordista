@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon.png" width="128" height="128" alt="Keywordista app icon: a radar sweep on a dark scope"></p>
+
 # Keywordista - App Store keyword tracker for indie iOS developers
 
 [![CI](https://github.com/bootuz/keywordista/actions/workflows/ci.yml/badge.svg)](https://github.com/bootuz/keywordista/actions/workflows/ci.yml)

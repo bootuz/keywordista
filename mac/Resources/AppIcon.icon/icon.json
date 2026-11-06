@@ -1,0 +1,43 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "srgb:0.17255,0.21176,0.28235,1.00000",
+      "srgb:0.05490,0.07451,0.10588,1.00000"
+    ],
+    "orientation" : {
+      "start" : { "x" : 0.5, "y" : 0 },
+      "stop" : { "x" : 0.5, "y" : 1 }
+    }
+  },
+  "groups" : [
+    {
+      "layers" : [
+        { "glass" : true, "image-name" : "blips.svg", "name" : "blips" }
+      ],
+      "shadow" : { "kind" : "layer-color", "opacity" : 0.5 },
+      "specular" : true,
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    },
+    {
+      "layers" : [
+        { "glass" : false, "image-name" : "sweep.svg", "name" : "sweep" }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0.5 },
+      "specular" : false,
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    },
+    {
+      "layers" : [
+        { "glass" : true, "image-name" : "ring-inner.svg", "name" : "ring-inner" },
+        { "glass" : true, "image-name" : "ring-middle.svg", "name" : "ring-middle" },
+        { "glass" : true, "image-name" : "ring-outer.svg", "name" : "ring-outer" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "specular" : true,
+      "translucency" : { "enabled" : true, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [ "macOS" ]
+  }
+}
