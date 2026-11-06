@@ -1,24 +1,16 @@
 name: CI
 
+# No workflow-level path filter: the `changes` job decides which jobs run.
+# Why: a workflow skipped by `paths-ignore` never reports its checks, so
+# they'd sit at "pending" forever if they're ever made required. A job
+# skipped by `if:` reports as skipped, which GitHub counts as passing.
 on:
   push:
     branches: [main]
-    # Skip the whole pipeline when a commit only touches non-functional
-    # files. GitHub's rule is "skip iff every changed file matches one of
-    # these patterns" — touching any source file still triggers a full run.
-    # Add to this list as new doc-shaped files appear (CHANGELOG, etc.).
-    paths-ignore:
-      - '**/*.md'
-      - '.gitignore'
-      - 'LICENSE'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - '.gitignore'
-      - 'LICENSE'
   # Lets us trigger CI manually from the Actions tab — handy when poking
-  # at a workflow change without pushing extra commits.
+  # at a workflow change without pushing extra commits. Runs every job.
   workflow_dispatch:
 
 # Cancel in-progress runs on the same ref when a new push arrives. Keeps the
@@ -29,12 +21,69 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changed areas
+    # Each layer has its own build system and its own CI job, so a change
+    # to web/ shouldn't pay for two macOS runners and a Docker build. This
+    # job maps changed paths to the jobs that need to run; every other job
+    # gates on its output.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # paths-filter reads a PR's file list through the API.
+      pull-requests: read
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+      env-manifest: ${{ steps.filter.outputs.env-manifest }}
+      spa: ${{ steps.filter.outputs.spa }}
+      mac: ${{ steps.filter.outputs.mac }}
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      # Needed for push events, where changes are diffed against the
+      # previous commit locally. PRs use the API and ignore the checkout.
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Keep these in step with what each job actually reads. `ci` is
+          # folded into every group so editing this workflow tests itself.
+          # Tests/ only reads Sources/ and its own fixtures, and mac/ is a
+          # self-contained SPM package, so neither crosses into another
+          # layer.
+          filters: |
+            ci: &ci
+              - '.github/workflows/ci.yml'
+            server: &server
+              - *ci
+              - 'Sources/**'
+              - 'Tests/**'
+              - 'Package.swift'
+              - 'Package.resolved'
+            env-manifest:
+              - *ci
+              - 'Sources/App/**'
+              - 'scripts/check-env-manifest.sh'
+            spa:
+              - *ci
+              - 'web/**'
+            mac:
+              - *ci
+              - 'mac/**'
+            # The image also builds web/, but the `spa` job already runs
+            # the same npm ci + build, so a web-only change skips Docker.
+            image:
+              - *server
+              - 'Dockerfile'
+              - '.dockerignore'
+
   env-manifest:
     name: Env-var contract guard
     # Pure bash + grep — Ubuntu is faster and cheaper than macOS for this.
     # Runs in parallel with the heavier build jobs so it fans out signal
     # early: a PR that drifts the env-var contract sees the failure within
     # 30 seconds, not after waiting for the full Swift build.
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.env-manifest == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +96,8 @@ jobs:
     # concurrency rules that match the local dev setup). macos-14's default
     # Xcode 15.4 doesn't have the `Testing` module and rejects some of our
     # weak-self captures.
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.server == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +134,8 @@ jobs:
     name: Svelte SPA (type-check + build)
     # SPA build is platform-agnostic; Ubuntu is faster and cheaper than macOS
     # runners for plain npm work.
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.spa == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -117,6 +170,8 @@ jobs:
     # concurrency rules that match the local dev setup). macos-14's default
     # Xcode 15.4 doesn't have the `Testing` module and rejects some of our
     # weak-self captures.
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac == 'true'
     runs-on: macos-15
     defaults:
       run:
@@ -164,6 +219,8 @@ jobs:
     # but amd64 only (no QEMU arm64 emulation; release-image.yml owns
     # multi-arch) and not pushed anywhere. Catches Dockerfile breakage
     # and image-bloat regressions before they hit a real release.
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
