@@ -5,23 +5,17 @@ import Testing
 
 @Suite("KeywordPopularityService")
 struct KeywordPopularityServiceTests {
-    private func makeService(
-        asa: ASACredentials?,
-        keywords: [Keyword],
-        campaigns: [ASACampaign],
-        searchTerms: [Int64: [ASASearchTerm]],
-    ) -> KeywordPopularityService {
+    private func makeService(asa: ASACredentials?, keywords: [Keyword], mirror: InMemoryAppleAdsDataRepository) -> KeywordPopularityService {
         KeywordPopularityService(
             settings: StubASASettings(asa: asa),
             keywordRepo: InMemoryKeywordRepository(keywords),
-            makeClient: { _ in StubASAClientP(campaigns: campaigns, searchTermsByCampaign: searchTerms) },
-            now: { Date(timeIntervalSince1970: 1_750_000_000) },
-            logger: Logger(label: "test"),
+            mirror: mirror,
+            today: { "2026-11-06" }
         )
     }
 
-    @Test("maps ASA impressions onto tracked keywords by (term, country); ignores LOW_VOLUME and unmatched")
-    func mapsImpressions() async throws {
+    @Test("maps synced search-term impressions onto tracked keywords by (term, country); ignores LOW_VOLUME and unmatched")
+    func popularityServiceReadsMirror() async throws {
         let kwUS = UUID()
         let kwUSUntracked = UUID()
         let kwDE = UUID()
@@ -30,23 +24,15 @@ struct KeywordPopularityServiceTests {
             Keyword(id: kwUSUntracked, term: "obscure term", countryCode: "us"),  // no ASA data
             Keyword(id: kwDE, term: "karteikarten", countryCode: "de"),
         ]
-        let campaigns = [
-            ASACampaign(id: 1, name: "US", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
-            ASACampaign(id: 2, name: "DE", countriesOrRegions: ["DE"], displayStatus: "RUNNING"),
-        ]
-        let terms: [Int64: [ASASearchTerm]] = [
-            1: [
-                .init(text: "flashcards", source: "AUTO", impressions: 900, taps: 30, ttr: 0.03, localSpend: 0),
-                .init(text: "flashcards", source: "TARGETED", impressions: 100, taps: 5, ttr: 0.05, localSpend: 0), // same term, 2nd campaign row → sums to 1000
-                .init(text: "LOW_VOLUME", source: "AUTO", impressions: 50, taps: 0, ttr: 0, localSpend: 0),         // ignored
-            ],
-            2: [
-                .init(text: "karteikarten", source: "AUTO", impressions: 400, taps: 12, ttr: 0.03, localSpend: 0),
-            ],
-        ]
+        let mirror = InMemoryAppleAdsDataRepository()
+        try await AppleAdsMirrorSeed.synced(mirror, AppleAdsMirrorSeed.searchTerms([
+            ("flashcards", "US", 1, 900, 30, "AUTO"),
+            ("Flashcards", "US", 2, 100, 5, "TARGETED"), // same term, 2nd campaign → sums to 1000
+            ("LOW_VOLUME", "US", 1, 50, 0, "AUTO"),       // ignored
+            ("karteikarten", "DE", 3, 400, 12, "AUTO"),
+        ]))
 
-        let service = makeService(asa: .stub, keywords: keywords, campaigns: campaigns, searchTerms: terms)
-        let pop = try await service.popularity()
+        let pop = try await makeService(asa: .stub, keywords: keywords, mirror: mirror).popularity()
 
         #expect(pop[kwUS] == 1000)            // summed across the two US rows
         #expect(pop[kwDE] == 400)
@@ -57,25 +43,26 @@ struct KeywordPopularityServiceTests {
     @Test("a US term's impressions don't leak to a same-term keyword tracked in another country")
     func countryScoped() async throws {
         let kwDE = UUID()
-        let keywords = [Keyword(id: kwDE, term: "flashcards", countryCode: "de")]
-        let campaigns = [ASACampaign(id: 1, name: "US", countriesOrRegions: ["US"], displayStatus: "RUNNING")]
-        let terms: [Int64: [ASASearchTerm]] = [
-            1: [.init(text: "flashcards", source: "AUTO", impressions: 900, taps: 30, ttr: 0.03, localSpend: 0)],
-        ]
-        let service = makeService(asa: .stub, keywords: keywords, campaigns: campaigns, searchTerms: terms)
-        let pop = try await service.popularity()
+        let mirror = InMemoryAppleAdsDataRepository()
+        try await AppleAdsMirrorSeed.synced(mirror, AppleAdsMirrorSeed.searchTerms([("flashcards", "US", 1, 900, 30, "AUTO")]))
+        let pop = try await makeService(asa: .stub, keywords: [Keyword(id: kwDE, term: "flashcards", countryCode: "de")], mirror: mirror).popularity()
         #expect(pop[kwDE] == nil)  // US impressions must not count for a DE keyword
     }
 
     @Test("returns empty when ASA is not configured")
     func noASA() async throws {
-        let service = makeService(
-            asa: nil,
-            keywords: [Keyword(id: UUID(), term: "flashcards", countryCode: "us")],
-            campaigns: [],
-            searchTerms: [:],
-        )
+        let mirror = InMemoryAppleAdsDataRepository()
+        try await AppleAdsMirrorSeed.synced(mirror, AppleAdsMirrorSeed.searchTerms([("flashcards", "US", 1, 900, 30, "AUTO")]))
+        let service = makeService(asa: nil, keywords: [Keyword(id: UUID(), term: "flashcards", countryCode: "us")], mirror: mirror)
         #expect(try await service.popularity().isEmpty)
+    }
+
+    @Test("a failed last sync with nothing synced surfaces the sync's error")
+    func failedLastSyncThrows() async throws {
+        let mirror = InMemoryAppleAdsDataRepository()
+        await AppleAdsMirrorSeed.failedRun(mirror, error: "boom")
+        let service = makeService(asa: .stub, keywords: [Keyword(id: UUID(), term: "flashcards", countryCode: "us")], mirror: mirror)
+        await #expect(throws: AppleAdsError.syncFailed("boom")) { _ = try await service.popularity() }
     }
 }
 
@@ -96,41 +83,4 @@ private actor StubASASettings: SettingsServiceProtocol {
     func getASACredentials() async throws -> ASACredentials? { asa }
     func setASACredentials(_ creds: ASACredentials) async throws {}
     func clearASACredentials() async throws {}
-}
-
-extension KeywordPopularityServiceTests {
-    @Test("when every campaign's report fails, the error surfaces instead of an empty result")
-    func allReportsFailingThrows() async throws {
-        let service = KeywordPopularityService(
-            settings: StubASASettings(asa: .stub),
-            keywordRepo: InMemoryKeywordRepository([Keyword(id: UUID(), term: "flashcards", countryCode: "us")]),
-            makeClient: { _ in ReportsFailingASAClientP() },
-            now: { Date(timeIntervalSince1970: 1_750_000_000) },
-            logger: Logger(label: "test"),
-        )
-        await #expect(throws: AppleAdsError.unreadableResponse("x")) { _ = try await service.popularity() }
-    }
-}
-
-private struct ReportsFailingASAClientP: AppleSearchAdsClientProtocol {
-    func listCampaigns() async throws -> [ASACampaign] {
-        [ASACampaign(id: 1, name: "US", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
-         ASACampaign(id: 2, name: "US2", countriesOrRegions: ["US"], displayStatus: "RUNNING")]
-    }
-    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
-        throw AppleAdsError.unreadableResponse("x")
-    }
-}
-
-private actor StubASAClientP: AppleSearchAdsClientProtocol {
-    let campaigns: [ASACampaign]
-    let searchTermsByCampaign: [Int64: [ASASearchTerm]]
-    init(campaigns: [ASACampaign], searchTermsByCampaign: [Int64: [ASASearchTerm]]) {
-        self.campaigns = campaigns
-        self.searchTermsByCampaign = searchTermsByCampaign
-    }
-    func listCampaigns() async throws -> [ASACampaign] { campaigns }
-    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
-        searchTermsByCampaign[campaignId] ?? []
-    }
 }

@@ -31,6 +31,8 @@ enum AppleAdsError: Error, Equatable, CustomStringConvertible {
     case invalidAdAccountId(String)
     /// No Apple Ads credentials are stored.
     case notConnected
+    /// No sync has ever succeeded and the latest one failed with this copy.
+    case syncFailed(String)
 
     var description: String {
         switch self {
@@ -52,6 +54,8 @@ enum AppleAdsError: Error, Equatable, CustomStringConvertible {
             return "Couldn't reach Apple Ads: \(detail)"
         case .notConnected:
             return "Connect Apple Ads first"
+        case .syncFailed(let reason):
+            return "The last Apple Ads sync failed: \(reason)"
         case .invalidAdAccountId(let raw):
             return "The saved ad account ID \"\(raw)\" isn't valid. Pick the ad account again in Settings → Apple Ads."
         }

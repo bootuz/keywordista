@@ -97,3 +97,32 @@ extension AppleAdsSnapshot {
         self.init(campaigns: [], keywords: [], campaignDays: [], keywordDays: [], searchTermDays: [], popularity: [], ideas: [])
     }
 }
+
+enum AppleAdsMirrorSeed {
+    /// Writes `snapshot` for account 42 and records a successful run, as a sync would.
+    static func synced(_ repo: InMemoryAppleAdsDataRepository, _ snapshot: AppleAdsSnapshot, to: String = "2026-11-06") async throws {
+        try await repo.replace(adAccountId: 42, from: "2026-08-09", to: to, with: snapshot)
+        await repo.seedRun(AppleAdsSyncRun(
+            id: UUID(), adAccountId: 42, trigger: .manual, outcome: .succeeded,
+            startedAt: Date(), finishedAt: Date(), fromDate: "2026-08-09", toDate: to, error: nil
+        ))
+    }
+
+    /// Search-term rows on one day; the campaign day pins the period's end.
+    static func searchTerms(_ rows: [(term: String, country: String, campaign: Int64, impressions: Int, taps: Int, source: String)], date: String = "2026-11-05") -> AppleAdsSnapshot {
+        var snapshot = AppleAdsSnapshot()
+        snapshot.campaignDays = [AppleAdsCampaignDay(campaignId: 1, date: date, metrics: .zero, currency: "USD")]
+        snapshot.searchTermDays = rows.map {
+            AppleAdsSearchTermDay(campaignId: $0.campaign, adGroupId: $0.campaign * 10, keywordId: nil, term: $0.term, source: $0.source, country: $0.country, date: date,
+                                  metrics: AppleAdsFixtures.metrics(taps: $0.taps, impressions: $0.impressions))
+        }
+        return snapshot
+    }
+
+    static func failedRun(_ repo: InMemoryAppleAdsDataRepository, error: String) async {
+        await repo.seedRun(AppleAdsSyncRun(
+            id: UUID(), adAccountId: nil, trigger: .scheduled, outcome: .failed,
+            startedAt: Date(), finishedAt: Date(), fromDate: nil, toDate: nil, error: error
+        ))
+    }
+}

@@ -48,9 +48,31 @@ struct AppleAdsKeywordRowDTO: Content, Equatable {
     let alreadyRanksWell: Bool
 }
 
+struct AppleAdsIdeaDTO: Content, Equatable {
+    let term: String
+    let country: String
+    /// Paid results for the term in the period; nil for Apple's suggestions.
+    let metrics: AppleAdsMetricsDTO?
+    /// Apple's search popularity, 1–100, from the latest synced week.
+    let popularity: Int?
+    let organicRank: Int?
+    let difficulty: Int?
+    let trackedKeywordId: UUID?
+}
+
+struct AppleAdsBidIdeasDTO: Content, Equatable {
+    /// Search terms that brought installs but aren't exact-match bids yet.
+    let converted: [AppleAdsIdeaDTO]
+    /// Apple's keyword recommendations for the app, minus ones already bid.
+    let suggestions: [AppleAdsIdeaDTO]
+    /// Search terms with enough taps to judge and no installs.
+    let wasted: [AppleAdsIdeaDTO]
+}
+
 protocol AppleAdsInsightsServiceProtocol: Sendable {
     func overview(watchedAppId: UUID, days: Int) async throws -> AppleAdsOverviewDTO
     func keywords(watchedAppId: UUID, days: Int) async throws -> [AppleAdsKeywordRowDTO]
+    func bidIdeas(watchedAppId: UUID, days: Int) async throws -> AppleAdsBidIdeasDTO
 }
 
 /// Reads the synced Apple Ads mirror for the Apple Ads screens. Never calls
@@ -65,6 +87,8 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
 
     static let allowedDays: Set<Int> = [7, 30]
     static let ranksWellThrough = 5
+    /// Below this many taps, zero installs is noise rather than waste.
+    static let wastedMinTaps = 50
 
     func syncStatus() async throws -> AppleAdsSyncStatus {
         AppleAdsSyncStatus(
@@ -205,6 +229,82 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
             $0.metrics.spend != $1.metrics.spend ? $0.metrics.spend > $1.metrics.spend
                 : ($0.text, $0.country) < ($1.text, $1.country)
         }
+    }
+
+    func bidIdeas(watchedAppId: UUID, days: Int) async throws -> AppleAdsBidIdeasDTO {
+        let scope = try await scope(watchedAppId: watchedAppId, days: days)
+        guard let account = scope.account else { return AppleAdsBidIdeasDTO(converted: [], suggestions: [], wasted: []) }
+        let period = scope.period.current
+
+        let campaigns = try await repository.campaigns(adAccountId: account)
+            .filter { $0.appStoreId == scope.app.appStoreId }
+        let campaignIds = Set(campaigns.map(\.id))
+        let countriesByCampaign = Dictionary(campaigns.map { ($0.id, $0.countries.map { $0.uppercased() }) }, uniquingKeysWith: { a, _ in a })
+        // What's already bid, keyed by term|COUNTRY: a keyword bids in every
+        // storefront its campaign serves.
+        var bid: Set<String> = []
+        var exactBid: Set<String> = []
+        for keyword in try await repository.keywords(adAccountId: account) where campaignIds.contains(keyword.campaignId) {
+            for country in countriesByCampaign[keyword.campaignId] ?? [] {
+                let key = Self.matchKey(keyword.text, country)
+                bid.insert(key)
+                if keyword.matchType.uppercased() == "EXACT" { exactBid.insert(key) }
+            }
+        }
+
+        // Search terms summed per term and storefront.
+        var sums: [String: (term: String, country: String, metrics: AppleAdsMetrics)] = [:]
+        for row in try await repository.searchTermDays(adAccountId: account, from: period.lowerBound, to: period.upperBound)
+        where campaignIds.contains(row.campaignId) && !AppleAdsMirrorReader.isLowVolume(row.term) {
+            let key = Self.matchKey(row.term, row.country)
+            let current = sums[key]
+            sums[key] = (current?.term ?? row.term.lowercased(), row.country.uppercased(), (current?.metrics ?? .zero) + row.metrics)
+        }
+
+        let converted = sums.filter { $0.value.metrics.tapInstalls >= 1 && !exactBid.contains($0.key) }.values
+            .sorted { ($0.metrics.tapInstalls, $1.term) > ($1.metrics.tapInstalls, $0.term) }
+        let wasted = sums.values.filter { $0.metrics.taps >= Self.wastedMinTaps && $0.metrics.tapInstalls == 0 }
+            .sorted { ($0.metrics.spend, $1.term) > ($1.metrics.spend, $0.term) }
+        var seenIdeas: Set<String> = []
+        let suggestions = try await repository.ideas(adAccountId: account, appStoreId: scope.app.appStoreId)
+            .filter { idea in
+                let key = Self.matchKey(idea.text, idea.country)
+                return !bid.contains(key) && seenIdeas.insert(key).inserted
+            }
+
+        // Popularity and organic rank for every term shown.
+        let shown = converted.map { ($0.term, $0.country) } + wasted.map { ($0.term, $0.country) }
+            + suggestions.map { ($0.text.lowercased(), $0.country.uppercased()) }
+        var popularity: [String: Int] = [:]
+        for p in try await repository.popularity(terms: Set(shown.map(\.0)), countries: Set(shown.map(\.1))) {
+            if let value = p.popularity100 { popularity[Self.matchKey(p.term, p.country)] = value }
+        }
+        var tracked: [String: Keyword] = [:]
+        for keyword in try await keywords.all() {
+            tracked[Self.matchKey(keyword.term, keyword.countryCode)] = keyword
+        }
+
+        func idea(_ term: String, _ country: String, _ metrics: AppleAdsMetrics?) async throws -> AppleAdsIdeaDTO {
+            let key = Self.matchKey(term, country)
+            let match = tracked[key]
+            var check: RankCheck?
+            if let id = match?.id, let appId = scope.app.id {
+                check = try await rankChecks.latest(keywordID: id, watchedAppID: appId)
+            }
+            return AppleAdsIdeaDTO(
+                term: term, country: country.uppercased(), metrics: metrics.map(AppleAdsMath.dto),
+                popularity: popularity[key], organicRank: check?.rank, difficulty: check?.difficulty,
+                trackedKeywordId: match?.id
+            )
+        }
+
+        var convertedOut: [AppleAdsIdeaDTO] = []
+        for c in converted { convertedOut.append(try await idea(c.term, c.country, c.metrics)) }
+        var wastedOut: [AppleAdsIdeaDTO] = []
+        for w in wasted { wastedOut.append(try await idea(w.term, w.country, w.metrics)) }
+        var suggestionsOut: [AppleAdsIdeaDTO] = []
+        for s in suggestions { suggestionsOut.append(try await idea(s.text.lowercased(), s.country, nil)) }
+        return AppleAdsBidIdeasDTO(converted: convertedOut, suggestions: suggestionsOut, wasted: wastedOut)
     }
 
     private static func matchKey(_ term: String, _ country: String) -> String {

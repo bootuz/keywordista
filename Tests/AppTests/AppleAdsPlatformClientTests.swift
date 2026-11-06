@@ -46,18 +46,20 @@ struct AppleAdsPlatformClientTests {
 
     // ── Campaigns ──────────────────────────────────────────────────────
 
-    @Test("listCampaigns pages until totalCount and uppercases countries")
-    func listCampaignsPaginatesAndMapsCountries() async throws {
+    @Test("campaign query pages until totalCount and uppercases countries")
+    func campaignQueryPaginatesAndMapsCountries() async throws {
         let first = (1...1000).map { Self.campaign($0, countries: ["us"]) }
         let transport = StubAppleAdsTransport([
             Self.campaignPage(first, offset: 0, total: 1001),
             Self.campaignPage([Self.campaign(1001, countries: ["gb", "de"])], offset: 1000, total: 1001),
         ])
         let (client, session) = Self.makeClient(transport)
-        let campaigns = try await client.listCampaigns()
+        let campaigns = try await client.campaignInfos()
         #expect(campaigns.count == 1001)
-        #expect(campaigns.first?.countriesOrRegions == ["US"])
-        #expect(campaigns.last == ASACampaign(id: 1001, name: "C1001", countriesOrRegions: ["GB", "DE"], displayStatus: "RUNNING"))
+        #expect(campaigns.first?.countries == ["US"])
+        #expect(campaigns.last?.id == 1001)
+        #expect(campaigns.last?.countries == ["GB", "DE"])
+        #expect(campaigns.last?.status == "RUNNING")
         #expect(await transport.requests.count == 2)
         await session.shutdown()
     }
@@ -66,7 +68,7 @@ struct AppleAdsPlatformClientTests {
     func campaignQuerySendsAdAccountContextHeader() async throws {
         let transport = StubAppleAdsTransport([Self.campaignPage([], offset: 0, total: 0)])
         let (client, session) = Self.makeClient(transport)
-        _ = try await client.listCampaigns()
+        _ = try await client.campaignInfos()
         let request = try #require(await transport.requests.first)
         #expect(request.path.hasSuffix("/campaigns/query"))
         #expect(request.headers[HTTPField.Name("X-AP-Context")!] == XApContext(adAccountID: 42).rawValue)
@@ -82,58 +84,7 @@ struct AppleAdsPlatformClientTests {
             .init(status: .ok, json: #"{"result":[{"id":"77","name":"S","targeting":{"countryOrRegion":{"include":["US"]}}}],"pagination":{"offset":0,"pageSize":1,"totalCount":1}}"#),
         ])
         let (client, session) = Self.makeClient(transport)
-        #expect(try await client.listCampaigns().first?.id == 77)
-        await session.shutdown()
-    }
-
-    // ── Search terms ───────────────────────────────────────────────────
-
-    private static let searchTermsJSON = #"""
-    {"result":{"rows":[
-      {"metadata":{"campaignId":7,"adAccountId":42,"searchTermText":"photo editor","searchTermSource":"TARGETED","adGroupId":9},
-       "totalMetrics":{"impressions":3000,"taps":150,"ttr":0.05,"localSpend":{"amount":"45.50","currency":"USD"}}},
-      {"metadata":{"campaignId":7,"adAccountId":42,"searchTermSource":"AUTO"},
-       "totalMetrics":{"impressions":12}}
-    ]},"pagination":{"offset":0,"pageSize":2,"totalCount":2}}
-    """#
-
-    @Test("searchTermsReport maps rows and sends the campaign filter, ORTZ, DAILY, dates")
-    func searchTermsReportMapsRowsAndSendsCampaignFilter() async throws {
-        let transport = StubAppleAdsTransport([.init(status: .ok, json: Self.searchTermsJSON)])
-        let (client, session) = Self.makeClient(transport)
-        let end = Date(timeIntervalSince1970: 1_793_923_200)          // 2026-11-06
-        let start = end.addingTimeInterval(-30 * 86_400)               // 2026-10-07
-        let rows = try await client.searchTermsReport(campaignId: 7, startDate: start, endDate: end)
-
-        #expect(rows.first == ASASearchTerm(text: "photo editor", source: "TARGETED", impressions: 3000, taps: 150, ttr: 0.05, localSpend: 45.5))
-        let request = try #require(await transport.requests.first)
-        #expect(request.path.hasSuffix("/reports/apps/searchterms/query"))
-        let body = try Self.json(request.body)
-        let filter = try #require((body["filters"] as? [[String: Any]])?.first)
-        #expect(filter["field"] as? String == "campaignId")
-        #expect((filter["value"] as? NSNumber)?.int64Value == 7)
-        let range = try #require(body["timeRange"] as? [String: Any])
-        #expect(range["start"] as? String == "2026-10-07")
-        #expect(range["end"] as? String == "2026-11-06")
-        #expect(range["timeZone"] as? String == "ORTZ")
-        #expect(range["granularity"] as? String == "DAILY")
-        await session.shutdown()
-    }
-
-    @Test("rows with no searchTermText count as LOW_VOLUME")
-    func nullSearchTermTextMapsToLowVolume() async throws {
-        let transport = StubAppleAdsTransport([.init(status: .ok, json: Self.searchTermsJSON)])
-        let (client, session) = Self.makeClient(transport)
-        let rows = try await client.searchTermsReport(campaignId: 7, startDate: Date(), endDate: Date())
-        #expect(rows.last == ASASearchTerm(text: "LOW_VOLUME", source: "AUTO", impressions: 12, taps: 0, ttr: 0, localSpend: 0))
-        await session.shutdown()
-    }
-
-    @Test("a report with no rows yields an empty array")
-    func emptyReportYieldsNoRows() async throws {
-        let transport = StubAppleAdsTransport([.init(status: .ok, json: #"{"result":{}}"#)])
-        let (client, session) = Self.makeClient(transport)
-        #expect(try await client.searchTermsReport(campaignId: 7, startDate: Date(), endDate: Date()).isEmpty)
+        #expect(try await client.campaignInfos().first?.id == 77)
         await session.shutdown()
     }
 
@@ -178,7 +129,7 @@ struct AppleAdsPlatformClientTests {
     func explicitAdAccountIdSkipsAcls() async throws {
         let transport = StubAppleAdsTransport([Self.campaignPage([], offset: 0, total: 0)])
         let (client, session) = Self.makeClient(transport)
-        _ = try await client.listCampaigns()
+        _ = try await client.campaignInfos()
         #expect(await transport.requests.map(\.operationID) == [Operations.PostCampaignsQuery.id])
         await session.shutdown()
     }
@@ -192,7 +143,7 @@ struct AppleAdsPlatformClientTests {
             Self.campaignPage([Self.campaign(1, countries: ["US"])], offset: 0, total: 1),
         ])
         let (client, session) = Self.makeClient(transport)
-        #expect(try await client.listCampaigns().count == 1)
+        #expect(try await client.campaignInfos().count == 1)
         #expect(await transport.requests.count == 2)
         await session.shutdown()
     }
@@ -216,7 +167,7 @@ struct AppleAdsPlatformClientTests {
     func unauthorizedMapsToReadableError() async throws {
         let transport = StubAppleAdsTransport([.init(status: .unauthorized, json: "{}")])
         let (client, session) = Self.makeClient(transport)
-        await #expect(throws: AppleAdsError.unauthorized) { _ = try await client.listCampaigns() }
+        await #expect(throws: AppleAdsError.unauthorized) { _ = try await client.campaignInfos() }
         await session.shutdown()
     }
 

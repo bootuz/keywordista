@@ -49,7 +49,7 @@ struct AppleAdsSyncService: AppleAdsSyncServiceProtocol {
             try await repository.replace(adAccountId: adAccountId, from: window.from, to: window.to, with: snapshot)
         } catch {
             if !(error is CancellationError) {
-                try? await finish(run, account: adAccountId, outcome: .failed, window: window, error: error)
+                _ = try? await finish(run, account: adAccountId, outcome: .failed, window: window, error: error)
             }
             throw error
         }

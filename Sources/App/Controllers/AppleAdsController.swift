@@ -9,6 +9,7 @@ struct AppleAdsController: RouteCollection {
         ads.get("sync-status", use: syncStatus)
         ads.get("overview", use: overview)
         ads.get("keywords", use: keywords)
+        ads.get("bid-ideas", use: bidIdeas)
     }
 
     @Sendable func syncNow(req: Request) async throws -> Response {
@@ -33,6 +34,12 @@ struct AppleAdsController: RouteCollection {
         try await Self.requireConnected(req)
         let query = try req.query.decode(OverviewQuery.self)
         return try await req.appleAdsInsightsService().keywords(watchedAppId: query.appId, days: query.days ?? 30)
+    }
+
+    @Sendable func bidIdeas(req: Request) async throws -> AppleAdsBidIdeasDTO {
+        try await Self.requireConnected(req)
+        let query = try req.query.decode(OverviewQuery.self)
+        return try await req.appleAdsInsightsService().bidIdeas(watchedAppId: query.appId, days: query.days ?? 30)
     }
 
     /// `appId` is the watched app's UUID; `days` is 7 or 30 (default 30).
