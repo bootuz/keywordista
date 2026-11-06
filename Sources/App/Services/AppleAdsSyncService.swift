@@ -70,16 +70,7 @@ struct AppleAdsSyncService: AppleAdsSyncServiceProtocol {
     }
 
     static func shift(_ day: String, days: Int) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let date = formatter.date(from: day),
-              let moved = calendar.date(byAdding: .day, value: days, to: date) else { return day }
-        return formatter.string(from: moved)
+        AppleAdsMath.shift(day, days: days)
     }
 
     // MARK: Fetch

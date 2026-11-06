@@ -195,8 +195,8 @@ actor InMemoryAppleAdsDataRepository: AppleAdsDataRepositoryProtocol {
         runs[i] = AppleAdsSyncRun(id: r.id, adAccountId: adAccountId, trigger: r.trigger, outcome: outcome, startedAt: r.startedAt, finishedAt: Date(), fromDate: fromDate, toDate: toDate, error: error)
     }
     func latestRun() async throws -> AppleAdsSyncRun? { runs.last }
-    func lastSuccessfulRun(adAccountId: Int64) async throws -> AppleAdsSyncRun? {
-        runs.last { $0.adAccountId == adAccountId && $0.outcome == .succeeded }
+    func lastSuccessfulRun(adAccountId: Int64?) async throws -> AppleAdsSyncRun? {
+        runs.last { (adAccountId == nil || $0.adAccountId == adAccountId) && $0.outcome == .succeeded }
     }
     /// Test hook: seed a finished run directly.
     func seedRun(_ run: AppleAdsSyncRun) { runs.append(run) }

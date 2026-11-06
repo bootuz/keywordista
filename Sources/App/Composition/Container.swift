@@ -67,6 +67,16 @@ extension Request {
         FluentAppleAdsDataRepository(db: db)
     }
 
+    func appleAdsInsightsService() -> AppleAdsInsightsService {
+        let coordinator = application.appleAdsSyncCoordinator
+        return AppleAdsInsightsService(
+            repository: appleAdsDataRepository(),
+            watchedApps: FluentWatchedAppRepository(db: db),
+            syncRunning: { await coordinator.isRunning },
+            today: { Date().formatted(Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day()) }
+        )
+    }
+
     func appleAdsClient(for credentials: ASACredentials) -> AppleAdsPlatformClient {
         AppleAdsPlatformClient(credentials: credentials, session: application.appleAdsSession, logger: logger)
     }

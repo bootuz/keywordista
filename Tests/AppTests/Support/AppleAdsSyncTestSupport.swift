@@ -90,3 +90,10 @@ enum AppleAdsFixtures {
     static let ownApp = WatchedApp(id: UUID(), appStoreId: 99, bundleId: "com.example.cards", name: "Cards", iconURL: nil, primaryGenreId: 6017, kind: .own)
     static let campaign = AppleAdsCampaignInfo(id: 1, appStoreId: 99, name: "US Search", status: "RUNNING", countries: ["US"], dailyBudget: 20, currency: "USD")
 }
+
+extension AppleAdsSnapshot {
+    /// An empty snapshot tests fill field by field.
+    init() {
+        self.init(campaigns: [], keywords: [], campaignDays: [], keywordDays: [], searchTermDays: [], popularity: [], ideas: [])
+    }
+}

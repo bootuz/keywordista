@@ -40,7 +40,8 @@ protocol AppleAdsDataRepositoryProtocol: Sendable {
     func startRun(trigger: AppleAdsSyncTrigger) async throws -> AppleAdsSyncRun
     func finishRun(id: UUID, adAccountId: Int64?, outcome: AppleAdsSyncOutcome, fromDate: String?, toDate: String?, error: String?) async throws
     func latestRun() async throws -> AppleAdsSyncRun?
-    func lastSuccessfulRun(adAccountId: Int64) async throws -> AppleAdsSyncRun?
+    /// nil means any account; the sync keeps only one account's runs.
+    func lastSuccessfulRun(adAccountId: Int64?) async throws -> AppleAdsSyncRun?
 }
 
 struct FluentAppleAdsDataRepository: AppleAdsDataRepositoryProtocol {
@@ -202,11 +203,11 @@ struct FluentAppleAdsDataRepository: AppleAdsDataRepositoryProtocol {
         try await AppleAdsSyncRunRow.query(on: db).sort(\.$startedAt, .descending).first().map(Self.run)
     }
 
-    func lastSuccessfulRun(adAccountId: Int64) async throws -> AppleAdsSyncRun? {
-        try await AppleAdsSyncRunRow.query(on: db)
-            .filter(\.$adAccountId == adAccountId)
+    func lastSuccessfulRun(adAccountId: Int64?) async throws -> AppleAdsSyncRun? {
+        var query = AppleAdsSyncRunRow.query(on: db)
             .filter(\.$outcome == AppleAdsSyncOutcome.succeeded.rawValue)
-            .sort(\.$finishedAt, .descending).first().map(Self.run)
+        if let adAccountId { query = query.filter(\.$adAccountId == adAccountId) }
+        return try await query.sort(\.$finishedAt, .descending).first().map(Self.run)
     }
 
     // MARK: Mapping
