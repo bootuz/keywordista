@@ -45,6 +45,10 @@ fi
 echo "→ building service binary ($CONFIG)…"
 (cd "$REPO_ROOT" && swift build -c "$CONFIG")
 cp "$REPO_ROOT/.build/$CONFIG/App" "$APP_BUNDLE/Contents/Resources/keywordista-server"
+# Version marker for ServiceSupervisor's bundled-vs-downloaded choice; same
+# source as build-dmg.sh (see the comment there).
+sed -n 's/^[[:space:]]*static let current = "\([^"]*\)".*/\1/p' "$REPO_ROOT/Sources/App/Services/Version.swift" \
+    > "$APP_BUNDLE/Contents/Resources/keywordista-server.version"
 
 echo "→ building SPA…"
 (cd "$REPO_ROOT/web" && npm run build --silent)

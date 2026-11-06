@@ -150,11 +150,22 @@ final class UpdateChecker: ObservableObject {
             //    the user just sees an error row.
             try await verifyCodesign(of: extractedBinary)
 
+            // Record the version next to the binary so the supervisor can
+            // compare this install against the one bundled in the .app
+            // without launching either. Written by us rather than shipped
+            // in the zip so service releases cut before markers existed
+            // get one too; the tag version is what release-service.yml
+            // stamped into the binary, so the two can't disagree.
+            try Data((version + "\n").utf8).write(
+                to: extractedService.appendingPathComponent(ServiceSupervisor.versionMarkerName),
+                options: [.atomic]
+            )
+
             // 4. Stop the current service, atomically replace the
-            //    service/ directory, restart. resolveBinary() in
-            //    ServiceSupervisor already prefers the data-dir copy
-            //    over the bundled fallback, so .start() picks up the
-            //    new binary automatically.
+            //    service/ directory, restart. The supervisor runs the
+            //    newer of this and the bundled copy; this release is
+            //    newer than what was running (that's why it was
+            //    offered), so .start() picks it up.
             status = .applying(version: version, stage: "swapping")
             guard let supervisor else { throw UpdateError.noSupervisor }
             await supervisor.stop()
