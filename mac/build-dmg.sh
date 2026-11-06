@@ -166,6 +166,17 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$APP_BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$SERVER_BIN" "$APP_BUNDLE/Contents/Resources/keywordista-server"
 cp -R "$REPO_ROOT/Public" "$APP_BUNDLE/Contents/Resources/Public"
+# Version marker the supervisor compares against a downloaded service update
+# to decide which one to run (see ServiceSupervisor.chooseServiceInstall).
+# Read from the same Version.swift literal the server reports at
+# /api/v1/version, so the marker can never disagree with the binary — if it
+# did, the updater would keep re-offering a release the supervisor won't run.
+# release-app.yml stamps that literal from the latest service-v* tag; local
+# `make dmg` builds leave it at 0.0.0, which loses to any downloaded release.
+SERVICE_VERSION="$(sed -n 's/^[[:space:]]*static let current = "\([^"]*\)".*/\1/p' "$REPO_ROOT/Sources/App/Services/Version.swift")"
+[[ -n "$SERVICE_VERSION" ]] || { warn "couldn't read service version from Sources/App/Services/Version.swift"; exit 1; }
+echo "$SERVICE_VERSION" > "$APP_BUNDLE/Contents/Resources/keywordista-server.version"
+step "bundled service version: $SERVICE_VERSION"
 cp "$MAC_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/"
 # Classic 8-byte BNDL hint — modern macOS doesn't strictly need it but
 # silences the occasional "damaged" warning on older systems.
