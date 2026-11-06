@@ -31,6 +31,7 @@ actor ScriptedReportingClient: AppleAdsReportingClientProtocol {
     var resolveError: (any Error)?
     var searchTermError: (any Error)?
     var popularityError: (any Error)?
+    var ideasError: (any Error)?
     private(set) var requestedWindows: [(from: String, to: String)] = []
     private(set) var popularityRequests: [(terms: [String], country: String, genre: String)] = []
     private var gate: CheckedContinuation<Void, Never>?
@@ -79,7 +80,8 @@ actor ScriptedReportingClient: AppleAdsReportingClientProtocol {
         return popularityRows.filter { terms.contains($0.term) && $0.country == country }
     }
     func keywordIdeas(appStoreId: Int64, country: String) async throws -> [AppleAdsKeywordIdea] {
-        ideaRows.filter { $0.appStoreId == appStoreId && $0.country == country }
+        if let ideasError { throw ideasError }
+        return ideaRows.filter { $0.appStoreId == appStoreId && $0.country == country }
     }
 }
 

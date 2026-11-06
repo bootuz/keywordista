@@ -72,6 +72,21 @@ struct AppleAdsInsightsServiceTests {
         #expect(o.lastSync.lastSuccessAt != nil)
     }
 
+    @Test("the sync's last day is still partial, so periods end the day before")
+    func periodExcludesPartialLastDay() async throws {
+        let h = Self.harness()
+        var snapshot = AppleAdsSnapshot()
+        snapshot.campaigns = [AppleAdsFixtures.campaign]
+        snapshot.campaignDays = [
+            Self.day(1, "2026-11-06", taps: 5, installs: 0, spend: 1),  // synced on its own day: partial
+            Self.day(1, "2026-11-05", taps: 100, installs: 4, spend: 20),
+        ]
+        try await Self.synced(h.repo, snapshot)
+        let o = try await h.service.overview(watchedAppId: Self.app.id!, days: 7)
+        #expect(o.to == "2026-11-05")
+        #expect(o.totals.taps == 100)
+    }
+
     @Test("campaigns promoting other apps are counted, not summed")
     func otherAppsCampaignsExcluded() async throws {
         let h = Self.harness()

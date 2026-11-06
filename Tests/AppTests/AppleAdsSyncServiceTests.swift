@@ -145,4 +145,17 @@ struct AppleAdsSyncServiceTests {
         await #expect(throws: AppleAdsError.notConnected) { _ = try await h.service.sync(trigger: .scheduled) }
         #expect(try await h.repo.latestRun() == nil)
     }
+
+    @Test("a failed suggestions call keeps the previous suggestions")
+    func failedIdeasKeepPreviousIdeas() async throws {
+        let h = Self.harness()
+        await Self.basicData(h.client)
+        await h.client.configure { $0.ideaRows = [AppleAdsKeywordIdea(appStoreId: 99, country: "US", text: "memory game", popularity: 2)] }
+        _ = try await h.service.sync(trigger: .manual)
+        await h.client.configure { $0.ideasError = AppleAdsError.http(status: 500, message: "") }
+        let run = try await h.service.sync(trigger: .manual)
+        #expect(run.outcome == .succeeded)
+        #expect(try await h.repo.ideas(adAccountId: 42, appStoreId: 99).map(\.text) == ["memory game"])
+    }
 }
+

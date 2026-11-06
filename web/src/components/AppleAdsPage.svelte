@@ -6,6 +6,7 @@
   import { ApiError, errorMessage, getAppleAdsSyncStatus, listApps, syncAppleAdsNow } from '../lib/api';
   import type { AppleAdsDays, AppleAdsSyncStatus } from '../lib/types';
   import { apps } from '../lib/stores';
+  import { currentAppId } from '../lib/viewState';
   import { ROUTES } from '../lib/router';
   import { timeAgo } from '../lib/time';
   import AppleAdsOverview from './AppleAdsOverview.svelte';
@@ -44,7 +45,8 @@
     try {
       const own = (await listApps()).filter((a) => a.kind === 'own');
       apps.set(own);
-      if (!appId && own.length > 0) appId = own[0].id;
+      // Follow the app picked in the app switcher, so Apple Ads opens on it.
+      if (!appId) appId = own.find((a) => a.id === $currentAppId)?.id ?? own[0]?.id ?? null;
     } catch {
       // The tabs show their own errors; an empty picker is enough here.
     }
@@ -147,6 +149,7 @@
       <div class="flex items-center gap-2 pb-2">
         <select
           bind:value={appId}
+          onchange={() => currentAppId.set(appId)}
           aria-label="App"
           class="w-48 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 py-1.5 text-sm text-zinc-900 dark:text-zinc-100"
         >

@@ -108,6 +108,7 @@ struct AppleAdsSyncService: AppleAdsSyncServiceProtocol {
                     ideas += try await client.keywordIdeas(appStoreId: app.appStoreId, country: country)
                 } catch {
                     logger.warning("Apple Ads keyword suggestions failed: app=\(app.appStoreId) country=\(country) error=\(error)")
+                    snapshot.failedIdeaScopes.insert(AppleAdsIdeaScope(appStoreId: app.appStoreId, country: country.uppercased()))
                 }
             }
             snapshot.ideas += ideas

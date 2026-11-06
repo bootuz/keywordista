@@ -105,6 +105,15 @@ struct AppleAdsSnapshot: Sendable, Equatable {
     var searchTermDays: [AppleAdsSearchTermDay]
     var popularity: [AppleAdsTermPopularity]
     var ideas: [AppleAdsKeywordIdea]
+    /// (app, storefront) pairs whose suggestions Apple failed to return this
+    /// time: their stored ideas stay, so a hiccup doesn't empty Bid ideas.
+    var failedIdeaScopes: Set<AppleAdsIdeaScope> = []
+}
+
+struct AppleAdsIdeaScope: Hashable, Sendable {
+    let appStoreId: Int64
+    /// Uppercased ISO code.
+    let country: String
 }
 
 enum AppleAdsSyncTrigger: String, Codable, Sendable {

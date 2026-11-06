@@ -124,4 +124,34 @@ struct AppleAdsSyncControllerTests {
         })
         try await AppleAdsTestApp.waitForIdle(app)
     }
+
+    @Test("picking the ad account the sync already uses keeps the synced data")
+    func pickingSameAccountKeepsData() async throws {
+        let app = try await AppleAdsTestApp.make(client: await Self.client())
+        defer { Task { try? await app.asyncShutdown() } }
+        // First save leaves the account on automatic; the sync resolves 42.
+        try await app.test(.PUT, "api/v1/settings/asa", beforeRequest: { req in
+            try req.content.encode(["clientId": "c", "clientSecret": "s"])
+        }, afterResponse: { res async in #expect(res.status == .ok) })
+        try await app.test(.POST, "api/v1/apple-ads/sync", afterResponse: { _ async in })
+        try await AppleAdsTestApp.waitForIdle(app)
+        let before = try await AppleAdsTestApp.mirrorRowCount(app)
+        #expect(before > 0)
+
+        try await AppleAdsTestApp.connect(app)  // same client, adAccountId "42"
+        #expect(try await AppleAdsTestApp.mirrorRowCount(app) == before)
+    }
+
+    @Test("picking a different ad account deletes the synced data")
+    func pickingOtherAccountPurges() async throws {
+        let app = try await AppleAdsTestApp.make(client: await Self.client())
+        defer { Task { try? await app.asyncShutdown() } }
+        try await AppleAdsTestApp.connect(app)
+        try await app.test(.POST, "api/v1/apple-ads/sync", afterResponse: { _ async in })
+        try await AppleAdsTestApp.waitForIdle(app)
+        try await app.test(.PUT, "api/v1/settings/asa", beforeRequest: { req in
+            try req.content.encode(["clientId": "c", "adAccountId": "77"])
+        }, afterResponse: { res async in #expect(res.status == .ok) })
+        #expect(try await AppleAdsTestApp.mirrorRowCount(app) == 0)
+    }
 }

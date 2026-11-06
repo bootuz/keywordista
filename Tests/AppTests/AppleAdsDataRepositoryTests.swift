@@ -62,12 +62,14 @@ struct AppleAdsDataRepositoryTests {
     @Test("a failing replace leaves every table as it was")
     func replaceIsAtomic() async throws {
         try await Self.withRepo { repo in
-            try await repo.replace(adAccountId: 42, from: Self.day(1), to: Self.day(3), with: Self.snapshot(campaignDays: Self.campaignDays(1...3, taps: 5)))
-            let duplicate = AppleAdsKeywordDay(keywordId: 7, campaignId: 1, country: "US", date: Self.day(2), metrics: Self.m(taps: 1), suggestedBid: nil)
+            // A stored day outside the next window: re-sending it collides with
+            // the unique index, which makes the second write fail partway.
+            let outside = AppleAdsKeywordDay(keywordId: 7, campaignId: 1, country: "US", date: Self.day(5), metrics: Self.m(taps: 1), suggestedBid: nil)
+            try await repo.replace(adAccountId: 42, from: Self.day(1), to: Self.day(5), with: Self.snapshot(campaignDays: Self.campaignDays(1...3, taps: 5), keywordDays: [outside]))
             await #expect(throws: (any Error).self) {
                 try await repo.replace(
                     adAccountId: 42, from: Self.day(1), to: Self.day(3),
-                    with: Self.snapshot(campaignDays: Self.campaignDays(1...3, taps: 8), keywordDays: [duplicate, duplicate])
+                    with: Self.snapshot(campaignDays: Self.campaignDays(1...3, taps: 8), keywordDays: [outside])
                 )
             }
             let days = try await repo.campaignDays(adAccountId: 42, from: Self.day(1), to: Self.day(3))
@@ -130,4 +132,36 @@ struct AppleAdsDataRepositoryTests {
             #expect(try await repo.latestRun()?.outcome == .succeeded)
         }
     }
+
+    @Test("duplicate rows in one Apple response don't break the write")
+    func replaceToleratesDuplicateRows() async throws {
+        try await Self.withRepo { repo in
+            var s = Self.snapshot(campaignDays: Self.campaignDays(1...1, taps: 5))
+            let idea = AppleAdsKeywordIdea(appStoreId: 99, country: "US", text: "flashcards", popularity: 3)
+            s.ideas = [idea, idea]
+            s.campaignDays += Self.campaignDays(1...1, taps: 5)
+            try await repo.replace(adAccountId: 42, from: Self.day(1), to: Self.day(1), with: s)
+            #expect(try await repo.ideas(adAccountId: 42, appStoreId: 99).count == 1)
+            #expect(try await repo.campaignDays(adAccountId: 42, from: Self.day(1), to: Self.day(1)).count == 1)
+        }
+    }
+
+    @Test("ideas whose fetch failed keep their previous rows; the rest are replaced")
+    func failedIdeaScopesKeepOldIdeas() async throws {
+        try await Self.withRepo { repo in
+            var first = Self.snapshot()
+            first.ideas = [
+                AppleAdsKeywordIdea(appStoreId: 99, country: "US", text: "old us", popularity: 3),
+                AppleAdsKeywordIdea(appStoreId: 99, country: "DE", text: "old de", popularity: 3),
+            ]
+            try await repo.replace(adAccountId: 42, from: Self.day(1), to: Self.day(1), with: first)
+            var second = Self.snapshot()
+            second.ideas = [AppleAdsKeywordIdea(appStoreId: 99, country: "DE", text: "new de", popularity: 2)]
+            second.failedIdeaScopes = [AppleAdsIdeaScope(appStoreId: 99, country: "US")]
+            try await repo.replace(adAccountId: 42, from: Self.day(1), to: Self.day(1), with: second)
+            let texts = Set(try await repo.ideas(adAccountId: 42, appStoreId: 99).map(\.text))
+            #expect(texts == ["old us", "new de"])
+        }
+    }
 }
+

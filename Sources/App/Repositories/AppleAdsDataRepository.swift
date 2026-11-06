@@ -48,30 +48,82 @@ struct FluentAppleAdsDataRepository: AppleAdsDataRepositoryProtocol {
     let db: any Database
 
     func replace(adAccountId: Int64, from: String, to: String, with snapshot: AppleAdsSnapshot) async throws {
-        try await db.transaction { tx in
-            try await AppleAdsCampaignRow.query(on: tx).filter(\.$adAccountId == adAccountId).delete()
-            try await AppleAdsKeywordRow.query(on: tx).filter(\.$adAccountId == adAccountId).delete()
-            try await AppleAdsKeywordIdeaRow.query(on: tx).filter(\.$adAccountId == adAccountId).delete()
-            try await AppleAdsCampaignDayRow.query(on: tx).filter(\.$adAccountId == adAccountId)
-                .filter(\.$date >= from).filter(\.$date <= to).delete()
-            try await AppleAdsKeywordDayRow.query(on: tx).filter(\.$adAccountId == adAccountId)
-                .filter(\.$date >= from).filter(\.$date <= to).delete()
-            try await AppleAdsSearchTermDayRow.query(on: tx).filter(\.$adAccountId == adAccountId)
-                .filter(\.$date >= from).filter(\.$date <= to).delete()
+        let a = adAccountId
+        // Apple can repeat a row within one response (the same suggestion
+        // twice, say). A duplicate natural key would fail the unique index and
+        // with it this sync and every later one, so the last copy wins.
+        let campaigns = Self.unique(snapshot.campaigns.map { Self.row($0, a) }) { "\($0.appleId)" }
+        let keywords = Self.unique(snapshot.keywords.map { Self.row($0, a) }) { "\($0.appleId)" }
+        let ideas = Self.unique(
+            snapshot.ideas
+                .filter { !snapshot.failedIdeaScopes.contains(AppleAdsIdeaScope(appStoreId: $0.appStoreId, country: $0.country.uppercased())) }
+                .map { Self.row($0, a) }
+        ) { "\($0.appStoreId)|\($0.country)|\($0.text)" }
+        let campaignDays = Self.unique(snapshot.campaignDays.map { Self.row($0, a) }) { "\($0.campaignId)|\($0.date)" }
+        let keywordDays = Self.unique(snapshot.keywordDays.map { Self.row($0, a) }) { "\($0.keywordId)|\($0.country)|\($0.date)" }
+        let searchTermDays = Self.unique(snapshot.searchTermDays.map { Self.row($0, a) }) {
+            "\($0.campaignId)|\($0.adGroupId)|\($0.keywordId)|\($0.term)|\($0.source)|\($0.country)|\($0.date)"
+        }
+        let popularity = Self.unique(snapshot.popularity.map { Self.row($0, a) }) { "\($0.term)|\($0.country)|\($0.genre)|\($0.week)" }
 
-            for c in snapshot.campaigns { try await Self.row(c, adAccountId).create(on: tx) }
-            for k in snapshot.keywords { try await Self.row(k, adAccountId).create(on: tx) }
-            for i in snapshot.ideas { try await Self.row(i, adAccountId).create(on: tx) }
-            for d in snapshot.campaignDays { try await Self.row(d, adAccountId).create(on: tx) }
-            for d in snapshot.keywordDays { try await Self.row(d, adAccountId).create(on: tx) }
-            for d in snapshot.searchTermDays { try await Self.row(d, adAccountId).create(on: tx) }
-            for p in snapshot.popularity {
+        try await db.transaction { tx in
+            try await AppleAdsCampaignRow.query(on: tx).filter(\.$adAccountId == a).delete()
+            try await AppleAdsKeywordRow.query(on: tx).filter(\.$adAccountId == a).delete()
+            // Ideas whose fetch failed this time keep their stored rows.
+            var ideaDelete = AppleAdsKeywordIdeaRow.query(on: tx).filter(\.$adAccountId == a)
+            for scope in snapshot.failedIdeaScopes {
+                ideaDelete = ideaDelete.group(.or) { g in
+                    g.filter(\.$appStoreId != scope.appStoreId).filter(\.$country != scope.country)
+                }
+            }
+            try await ideaDelete.delete()
+            try await AppleAdsCampaignDayRow.query(on: tx).filter(\.$adAccountId == a)
+                .filter(\.$date >= from).filter(\.$date <= to).delete()
+            try await AppleAdsKeywordDayRow.query(on: tx).filter(\.$adAccountId == a)
+                .filter(\.$date >= from).filter(\.$date <= to).delete()
+            try await AppleAdsSearchTermDayRow.query(on: tx).filter(\.$adAccountId == a)
+                .filter(\.$date >= from).filter(\.$date <= to).delete()
+            for p in popularity {
                 try await AppleAdsTermPopularityRow.query(on: tx)
-                    .filter(\.$adAccountId == adAccountId).filter(\.$term == p.term)
+                    .filter(\.$adAccountId == a).filter(\.$term == p.term)
                     .filter(\.$country == p.country).filter(\.$genre == p.genre).filter(\.$week == p.week)
                     .delete()
-                try await Self.row(p, adAccountId).create(on: tx)
             }
+
+            // Multi-row inserts: a 90-day backfill is tens of thousands of
+            // rows, and one INSERT each would hold SQLite's write lock long
+            // enough for a concurrent keyword refresh to hit "database is locked".
+            try await Self.insert(campaigns, on: tx)
+            try await Self.insert(keywords, on: tx)
+            try await Self.insert(ideas, on: tx)
+            try await Self.insert(campaignDays, on: tx)
+            try await Self.insert(keywordDays, on: tx)
+            try await Self.insert(searchTermDays, on: tx)
+            try await Self.insert(popularity, on: tx)
+        }
+    }
+
+    /// Keeps the last row per key, in first-seen order.
+    private static func unique<Row>(_ rows: [Row], key: (Row) -> String) -> [Row] {
+        var index: [String: Int] = [:]
+        var out: [Row] = []
+        for row in rows {
+            let k = key(row)
+            if let i = index[k] { out[i] = row } else { index[k] = out.count; out.append(row) }
+        }
+        return out
+    }
+
+    /// SQLite caps bound parameters per statement (32 766); 200 rows of at
+    /// most 15 columns stays well under it.
+    private static let insertChunk = 200
+
+    private static func insert<Row: Model>(_ rows: [Row], on db: any Database) async throws {
+        var start = 0
+        while start < rows.count {
+            let end = min(start + insertChunk, rows.count)
+            try await Array(rows[start..<end]).create(on: db)
+            start = end
         }
     }
 

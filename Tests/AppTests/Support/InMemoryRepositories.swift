@@ -127,7 +127,10 @@ actor InMemoryAppleAdsDataRepository: AppleAdsDataRepositoryProtocol {
         if let error = failNextReplace { failNextReplace = nil; throw error }
         campaignsByAccount[adAccountId] = s.campaigns
         keywordsByAccount[adAccountId] = s.keywords
-        ideasByAccount[adAccountId] = s.ideas
+        let kept = (ideasByAccount[adAccountId] ?? []).filter {
+            s.failedIdeaScopes.contains(AppleAdsIdeaScope(appStoreId: $0.appStoreId, country: $0.country.uppercased()))
+        }
+        ideasByAccount[adAccountId] = kept + s.ideas
         let inWindow: (String) -> Bool = { $0 >= from && $0 <= to }
         campaignDayRows.removeAll { $0.0 == adAccountId && inWindow($0.1.date) }
         keywordDayRows.removeAll { $0.0 == adAccountId && inWindow($0.1.date) }

@@ -117,11 +117,16 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
             throw Abort(.notFound, reason: "App not found")
         }
         // The account is whichever one last synced; the sync deletes the rest.
-        let account = try await repository.lastSuccessfulRun(adAccountId: nil)?.adAccountId
-        // Periods end at the newest synced day, not today: Apple's numbers
-        // for today are partial and would make every comparison look down.
+        let lastGood = try await repository.lastSuccessfulRun(adAccountId: nil)
+        let account = lastGood?.adAccountId
+        // Periods end at the newest complete synced day. The sync's last day
+        // was "today" when it ran, so its numbers are partial and would make
+        // every comparison with the previous period look down.
         var end = today()
-        if let account, let latest = try await repository.latestDate(adAccountId: account) { end = latest }
+        if let account, let latest = try await repository.latestDate(adAccountId: account) {
+            end = latest
+            if let syncedTo = lastGood?.toDate { end = min(end, AppleAdsMath.shift(syncedTo, days: -1)) }
+        }
         return Scope(app: app, account: account, period: AppleAdsMath.periods(endingAt: end, days: days))
     }
 
