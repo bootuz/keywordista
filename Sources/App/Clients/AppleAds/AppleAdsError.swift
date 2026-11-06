@@ -29,6 +29,8 @@ enum AppleAdsError: Error, Equatable, CustomStringConvertible {
     case unreachable(String)
     /// The stored ad account ID isn't a number, so it can't be Apple's.
     case invalidAdAccountId(String)
+    /// No Apple Ads credentials are stored.
+    case notConnected
 
     var description: String {
         switch self {
@@ -48,6 +50,8 @@ enum AppleAdsError: Error, Equatable, CustomStringConvertible {
             return "Couldn't get an Apple Ads access token: \(message)"
         case .unreachable(let detail):
             return "Couldn't reach Apple Ads: \(detail)"
+        case .notConnected:
+            return "Connect Apple Ads first"
         case .invalidAdAccountId(let raw):
             return "The saved ad account ID \"\(raw)\" isn't valid. Pick the ad account again in Settings → Apple Ads."
         }
