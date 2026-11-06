@@ -15,6 +15,8 @@ The tree is split into four layers, each with its own build system:
 | SwiftUI menubar shell | `mac/` | separate `mac/Package.swift` | `Keywordista.app` (wraps server + SPA) |
 | MCP server (TypeScript) | `mcp/` | `npm` + `tsc` | `mcp/dist/index.js` (stdio) |
 
+Toolchain floor: Swift 6.2 (Xcode 26) with Swift 5 language mode, macOS 15 for both the server and the menubar app. The floor comes from Apple's `apple-ads-platform-api-swift` package, which declares it statically.
+
 The `mac/` SPM package is intentionally separate so the macOS-only SwiftUI deps don't bleed into the cross-platform server build. Reference deploy manifests (docker-compose + Caddy + Litestream, Render, Fly, Kubernetes, Nomad) live in `deploy/`; ops docs in `docs/deploy/` and `docs/architecture/`.
 
 ## Common commands

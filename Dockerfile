@@ -6,10 +6,10 @@
 #
 # Three stages:
 #   1. spa-builder    — Node 20, builds the Svelte SPA → /spa/Public
-#   2. swift-builder  — Swift 6.1, builds the Vapor binary dynamically
+#   2. swift-builder  — Swift 6.2, builds the Vapor binary dynamically
 #                       linked against the Swift runtime libs that the
 #                       slim runtime base already ships
-#   3. runtime        — swift:6.1-jammy-slim, non-root user, /data
+#   3. runtime        — swift:6.2-jammy-slim, non-root user, /data
 #                       volume, runs as the entrypoint
 #
 # Why NOT `--static-swift-stdlib`: that flag bundles libswift* into
@@ -59,7 +59,7 @@ RUN test -f /Public/index.html || (echo "SPA build did not produce /Public/index
 
 # ── Stage 2: Vapor binary ────────────────────────────────────────────
 
-FROM swift:6.1-jammy AS swift-builder
+FROM swift:6.2-jammy AS swift-builder
 WORKDIR /build
 
 # Resolve deps first — Package.swift + Package.resolved (if present)
@@ -85,7 +85,7 @@ RUN mkdir -p /build/staging \
 
 # ── Stage 3: Runtime ─────────────────────────────────────────────────
 
-FROM swift:6.1-jammy-slim AS runtime
+FROM swift:6.2-jammy-slim AS runtime
 
 # Curl for the HEALTHCHECK probe + ca-certificates for outbound HTTPS
 # (iTunes / App Store Connect APIs). Both are tiny.

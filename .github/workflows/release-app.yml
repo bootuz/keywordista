@@ -49,6 +49,18 @@ jobs:
           # the newest service-v* tag reachable from this commit.
           fetch-depth: 0
 
+      - name: Select Xcode with Swift 6.2+
+        # apple/apple-ads-platform-api-swift needs swift-tools 6.2. Pick the
+        # newest Xcode 26 on the runner instead of trusting the image
+        # default, and fail loudly if the image ever drops it.
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$XC" ]; then
+            echo "::error::No Xcode 26 (Swift 6.2+) on this runner"; ls -d /Applications/Xcode*.app; exit 1
+          fi
+          sudo xcode-select -s "$XC"
+          swift --version
+
       - name: Free disk space (macOS runner cleanup)
         # macos-15 runners start with ~14GB free. The release build needs:
         #   • Vapor + deps SPM compile output:   ~6-8GB across both archs

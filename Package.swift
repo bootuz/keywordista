@@ -1,10 +1,12 @@
-// swift-tools-version:5.10
+// swift-tools-version:6.2
 import PackageDescription
 
 let package = Package(
     name: "keywordista",
     platforms: [
-        .macOS(.v13),
+        // macOS 15 floor comes from apple/apple-ads-platform-api-swift, which
+        // declares it statically; the bundled server inherits it.
+        .macOS(.v15),
     ],
     dependencies: [
         .package(url: "https://github.com/vapor/vapor.git", from: "4.99.0"),
@@ -20,6 +22,10 @@ let package = Package(
         // already pinned transitively via Vapor; declaring it here just
         // exposes the `Crypto` product to the App target.
         .package(url: "https://github.com/apple/swift-crypto.git", "4.0.0"..<"5.0.0"),
+        // Apple's official Platform API v1 client (Campaign Management v5 is
+        // retired 2027-01-26). Pinned exact: the package is generated from a
+        // moving OpenAPI spec, so minor bumps can reshape generated types.
+        .package(url: "https://github.com/apple/apple-ads-platform-api-swift", exact: "1.109.0"),
     ],
     targets: [
         .executableTarget(
@@ -32,6 +38,7 @@ let package = Package(
                 .product(name: "Queues", package: "queues"),
                 .product(name: "QueuesFluentDriver", package: "vapor-queues-fluent-driver"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "AppleAdsClient", package: "apple-ads-platform-api-swift"),
             ],
             path: "Sources/App",
             swiftSettings: [
@@ -49,5 +56,8 @@ let package = Package(
             ],
             path: "Tests/AppTests"
         ),
-    ]
+    ],
+    // Tools 6.2 is required to resolve the Apple Ads package; keep Swift 5
+    // language mode so the toolchain bump isn't also a Swift 6 migration.
+    swiftLanguageModes: [.v5]
 )
