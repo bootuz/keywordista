@@ -103,6 +103,7 @@ When adding a new service:
 - `AppleAdsSession` (an actor on `Application`, created in `configure.swift`) owns one live client per credential set, runs its `ServiceLifecycle` service, and shuts the old one down when credentials change. Build clients through it (`req.appleAdsClient(for:)`), never directly: each `AppleAdsClient` holds an HTTP client that must be shut down.
 - Every data call needs `X-AP-Context: adAccountId=…`. `AppleAdsPlatformClient.resolveAdAccountId()` uses the saved `asa.adAccountId`, else the only ACL account, else the one matching the legacy v5 `orgId`, else throws `adAccountSelectionRequired` so the user picks in Apple Ads → Setup. Never guess between accounts.
 - `AppleAdsRetryMiddleware` retries 429s only for GETs and `…/query` POSTs. Writes must surface the 429.
+- `AppleAdsErrorBodyMiddleware` reads Apple's reason out of every other error response (Apple wraps error bodies in `{"error": …}`, which the generated decoder can't read). Both come from `AppleAdsSession.standardMiddleware`; tests build clients from it too.
 - Failures become `AppleAdsError`, whose `description` is user-facing copy. It conforms to `AbortError` as a 502 (never 401, because the SPA sends every 401 to `/login`), so controllers just let it escape.
 - Disconnecting Apple Ads (`DELETE /settings/asa`) cancels a running sync, deletes all synced data, then shuts the session down. Saving a different client ID or ad account also deletes the synced data; changing the client ID drops the stored ad account.
 
