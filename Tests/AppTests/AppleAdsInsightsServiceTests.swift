@@ -146,6 +146,7 @@ struct AppleAdsInsightsServiceTests {
         #expect(us.text == "Flashcards")
         #expect(us.campaignName == "US Search")
         #expect(us.bid == 1.5)
+        #expect(us.currency == "USD")
         #expect(us.metrics.taps == 100)
         #expect(us.metrics.spend == 15)
         #expect(us.metrics.cpi == 3)
@@ -225,6 +226,7 @@ struct AppleAdsInsightsServiceTests {
         #expect(ideas.converted.map(\.term) == ["flashcards app"])
         #expect(ideas.converted.first?.metrics?.tapInstalls == 2)
         #expect(ideas.converted.first?.country == "US")
+        #expect(ideas.currency == "USD")
     }
 
     @Test("wasted spend needs at least 50 taps and no installs")

@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { DashboardRow, WatchedApp, DeveloperKeywordsResponse, AppMetadataSnapshot, KeywordOpportunity } from './types';
-import { getDashboard, getRefreshStatus, getDeveloperKeywords, getOpportunity, ApiError } from './api';
+import { getDashboard, getRefreshStatus, getDeveloperKeywords, getOpportunity, ApiError, apiReason } from './api';
 
 // Shared UI state. Each store has a single owner (the component that calls
 // the matching `set` after an API call); other components subscribe read-only.
@@ -29,17 +29,6 @@ export async function refreshOpportunity(): Promise<void> {
     // older server or a network blip stays silent.
     opportunityError.set(err instanceof ApiError && err.status === 502 ? apiReason(err.body) : null);
   }
-}
-
-// Vapor error bodies are `{"error":true,"reason":"…"}`.
-function apiReason(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as { reason?: unknown };
-    if (typeof parsed.reason === 'string' && parsed.reason) return parsed.reason;
-  } catch {
-    // Not JSON: fall through to the raw text.
-  }
-  return body || 'Apple Ads request failed.';
 }
 
 // ── Competitor analysis (v2) ────────────────────────────────────────────

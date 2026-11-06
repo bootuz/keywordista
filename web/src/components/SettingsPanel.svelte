@@ -5,12 +5,8 @@
     getASCSettings,
     putASCSettings,
     deleteASCSettings,
-    getASASettings,
-    putASASettings,
-    deleteASASettings,
-    getASAAccounts,
   } from '../lib/api';
-  import type { ASCStatus, ASAStatus, ASAAdAccount } from '../lib/types';
+  import type { ASCStatus } from '../lib/types';
   import { loadTheme, setTheme, type Theme } from '../lib/theme';
   import ThemePicker from './ThemePicker.svelte';
   import {
@@ -70,12 +66,11 @@
     }
   }
 
-  // Collapsed/expanded state for the API sections. Default closed to keep the
-  // panel compact; `loadASC` / `loadASA` open the section automatically if
+  // Collapsed/expanded state for the ASC section. Default closed to keep the
+  // panel compact; `loadASC` opens the section automatically if
   // it's not yet configured (so first-time users see the form they need to
   // fill in without an extra click).
   let ascExpanded = $state(false);
-  let asaExpanded = $state(false);
 
   // ── ASC state ─────────────────────────────────────────────────────────
   let ascStatus = $state<ASCStatus | null>(null);
@@ -87,24 +82,8 @@
   let ascError = $state<string | null>(null);
   let ascMessage = $state<string | null>(null);
 
-  // ── ASA state ─────────────────────────────────────────────────────────
-  let asaStatus = $state<ASAStatus | null>(null);
-  let asaClientId = $state('');
-  let asaClientSecret = $state('');
-  // Kept and sent back unchanged: it's the v5 org ID, which the server uses
-  // to pick an ad account automatically for users who set it up before v1.
-  let asaOrgId = $state('');
-  let asaAdAccountId = $state('');
-  let asaAccounts = $state<ASAAdAccount[] | null>(null);
-  let asaAccountsLoading = $state(false);
-  let asaAccountsError = $state<string | null>(null);
-  let asaReplacingSecret = $state(false);
-  let asaBusy = $state(false);
-  let asaError = $state<string | null>(null);
-  let asaMessage = $state<string | null>(null);
-
   onMount(async () => {
-    await Promise.all([loadASC(), loadASA()]);
+    await loadASC();
   });
 
   async function loadASC() {
@@ -117,19 +96,6 @@
       if (!ascStatus.configured) ascExpanded = true;
     } catch (e) {
       ascError = e instanceof Error ? e.message : String(e);
-    }
-  }
-
-  async function loadASA() {
-    try {
-      asaStatus = await getASASettings();
-      asaClientId = asaStatus.clientId ?? '';
-      asaOrgId = asaStatus.orgId ?? '';
-      asaAdAccountId = asaStatus.adAccountId ?? '';
-      if (!asaStatus.configured) asaExpanded = true;
-      else if (canMutateSettings) void loadASAAccounts();
-    } catch (e) {
-      asaError = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -186,69 +152,6 @@
     }
   }
 
-  async function loadASAAccounts() {
-    asaAccountsLoading = true;
-    asaAccountsError = null;
-    try {
-      asaAccounts = await getASAAccounts();
-    } catch (err) {
-      asaAccounts = null;
-      asaAccountsError = err instanceof Error ? err.message : String(err);
-    } finally {
-      asaAccountsLoading = false;
-    }
-  }
-
-  async function saveASA(e: Event) {
-    e.preventDefault();
-    asaBusy = true;
-    asaError = null;
-    asaMessage = null;
-    try {
-      const includeSecret = asaReplacingSecret || !asaStatus?.hasClientSecret;
-      if (includeSecret && !asaClientSecret.trim()) {
-        throw new Error('Client secret is required.');
-      }
-      asaStatus = await putASASettings({
-        clientId: asaClientId,
-        ...(includeSecret ? { clientSecret: asaClientSecret } : {}),
-        orgId: asaOrgId || undefined,
-        // Only send a choice the user could see, and only for the same API
-        // user: a new client ID's accounts haven't been listed yet, and the
-        // server drops the old choice when the client ID changes.
-        ...(asaAccounts && asaClientId.trim() === (asaStatus?.clientId ?? '') ? { adAccountId: asaAdAccountId } : {}),
-      });
-      asaClientSecret = '';
-      asaReplacingSecret = false;
-      asaMessage = 'Saved.';
-      void loadASAAccounts();
-    } catch (err) {
-      asaError = err instanceof Error ? err.message : String(err);
-    } finally {
-      asaBusy = false;
-    }
-  }
-
-  async function clearASA() {
-    if (!confirm('Disconnect Apple Ads?')) return;
-    asaBusy = true;
-    asaError = null;
-    try {
-      await deleteASASettings();
-      asaStatus = await getASASettings();
-      asaClientId = '';
-      asaClientSecret = '';
-      asaOrgId = '';
-      asaAdAccountId = '';
-      asaAccounts = null;
-      asaAccountsError = null;
-      asaMessage = 'Disconnected.';
-    } catch (err) {
-      asaError = err instanceof Error ? err.message : String(err);
-    } finally {
-      asaBusy = false;
-    }
-  }
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onClose()} />
@@ -504,172 +407,18 @@
       {/if}
     </section>
 
-    <!-- ASA ─────────────────────────────────────────────────────────────── -->
+    <!-- Apple Ads moved to its own area; keep a pointer for people who look here. -->
     <section class="rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
-      {#if canMutateSettings}
-        <button
-          type="button"
-          onclick={() => (asaExpanded = !asaExpanded)}
-          aria-expanded={asaExpanded}
-          aria-controls="asa-section-body"
-          class="flex w-full items-center justify-between gap-2 text-left"
-        >
-          <span class="flex items-center gap-2">
-            <svg
-              class="h-3 w-3 text-zinc-500 transition-transform {asaExpanded ? 'rotate-90' : ''}"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <polyline points="9 6 15 12 9 18" />
-            </svg>
-            <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Ads API</h3>
-          </span>
-          {#if asaStatus?.configured}
-            <span class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-              <svg
-                class="h-3.5 w-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <polyline points="5 12 10 17 19 8" />
-              </svg>
-              Connected
-            </span>
-          {:else}
-            <span class="text-xs text-zinc-500">Not connected</span>
-          {/if}
-        </button>
-      {:else}
-        <!-- Member view (server mode): see ASC section above for rationale. -->
-        <div class="flex w-full items-center justify-between gap-2">
-          <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Ads API</h3>
-          {#if asaStatus?.configured}
-            <span class="text-xs text-emerald-600 dark:text-emerald-400">Connected</span>
-          {:else}
-            <span class="text-xs text-zinc-500">Not connected</span>
-          {/if}
-        </div>
-        <p class="mt-2 text-xs text-zinc-500">
-          Read-only — ask an admin to update credentials.
-        </p>
-      {/if}
-      {#if asaExpanded && canMutateSettings}
-        <div id="asa-section-body" class="mt-3" transition:slide={{ duration: 200 }}>
-      <p class="mb-3 text-xs text-zinc-500">
-        Used for keyword suggestions and opportunity scores. In
-        <code class="rounded bg-zinc-800 px-1 text-zinc-300">ads.apple.com</code>, create an API user
-        and its client credentials; Apple's
+      <div class="flex items-center justify-between gap-2">
+        <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Ads API</h3>
         <a
-          href="https://developer.apple.com/documentation/apple-ads-platform-api/implementing-oauth-for-the-apple-ads-platform-api"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-amber-400 hover:underline"
+          href="#{ROUTES.appleAds('setup')}"
+          onclick={onClose}
+          class="text-xs text-amber-600 dark:text-amber-400 hover:underline"
         >
-          OAuth guide&nbsp;↗
+          Set up in Apple Ads →
         </a>
-        explains the Client ID and Client Secret.
-      </p>
-
-      <form onsubmit={saveASA} class="space-y-3">
-        <label class="block space-y-1">
-          <span class="text-xs uppercase tracking-wide text-zinc-500">Client ID</span>
-          <input
-            type="text"
-            placeholder="SEARCHADS.00000000-0000-0000-0000-000000000000"
-            bind:value={asaClientId}
-            class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none"
-          />
-        </label>
-
-        <div class="space-y-1">
-          <div class="flex items-baseline justify-between">
-            <span class="text-xs uppercase tracking-wide text-zinc-500">Client Secret</span>
-            {#if asaStatus?.hasClientSecret && !asaReplacingSecret}
-              <button
-                type="button"
-                onclick={() => (asaReplacingSecret = true)}
-                class="text-xs text-amber-600 dark:text-amber-400 hover:underline"
-              >
-                Replace
-              </button>
-            {/if}
-          </div>
-          {#if asaStatus?.hasClientSecret && !asaReplacingSecret}
-            <div class="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-500">
-              •••• stored
-            </div>
-          {:else}
-            <input
-              type="password"
-              autocomplete="off"
-              placeholder="Paste the client secret"
-              bind:value={asaClientSecret}
-              class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none"
-            />
-          {/if}
-        </div>
-
-        {#if asaStatus?.configured}
-          <label class="block space-y-1">
-            <span class="text-xs uppercase tracking-wide text-zinc-500">Ad account</span>
-            {#if asaAccounts}
-              <select
-                bind:value={asaAdAccountId}
-                class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none"
-              >
-                <option value="">Automatic{asaAccounts.length === 1 ? ` (${asaAccounts[0].name})` : ''}</option>
-                {#each asaAccounts as account (account.id)}
-                  <option value={account.id}>{account.name || account.id} · {account.id}</option>
-                {/each}
-              </select>
-              {#if asaAccounts.length > 1 && !asaAdAccountId}
-                <p class="text-xs text-amber-600 dark:text-amber-400">
-                  These credentials reach {asaAccounts.length} ad accounts. Pick the one that runs your app's campaigns.
-                </p>
-              {/if}
-            {:else if asaAccountsLoading}
-              <p class="text-xs text-zinc-500">Loading ad accounts…</p>
-            {:else if asaAccountsError}
-              <p class="text-xs text-red-600 dark:text-red-400">{asaAccountsError}</p>
-            {/if}
-          </label>
-        {/if}
-
-        {#if asaError}<p class="text-sm text-red-600 dark:text-red-400">{asaError}</p>{/if}
-        {#if asaMessage}<p class="text-sm text-emerald-600 dark:text-emerald-400">{asaMessage}</p>{/if}
-
-        <div class="flex items-center gap-2">
-          <button
-            type="submit"
-            disabled={asaBusy}
-            class="rounded-md bg-zinc-900 dark:bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-50 dark:text-zinc-950 hover:bg-black dark:hover:bg-white disabled:opacity-50"
-          >
-            {asaBusy ? 'Saving…' : 'Save'}
-          </button>
-          {#if asaStatus?.configured}
-            <button
-              type="button"
-              onclick={clearASA}
-              disabled={asaBusy}
-              class="text-xs text-zinc-500 hover:text-red-700 dark:hover:text-red-300"
-            >
-              Disconnect
-            </button>
-          {/if}
-        </div>
-      </form>
-        </div>
-      {/if}
+      </div>
     </section>
   </div>
 </aside>

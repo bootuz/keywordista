@@ -40,6 +40,8 @@ struct AppleAdsKeywordRowDTO: Content, Equatable {
     let country: String
     let bid: Double?
     let suggestedBid: Double?
+    /// Currency of the bid and spend amounts.
+    let currency: String?
     let metrics: AppleAdsMetricsDTO
     /// Latest organic rank of the tracked keyword with this term in this country.
     let organicRank: Int?
@@ -61,6 +63,8 @@ struct AppleAdsIdeaDTO: Content, Equatable {
 }
 
 struct AppleAdsBidIdeasDTO: Content, Equatable {
+    /// Currency of the spend amounts.
+    let currency: String?
     /// Search terms that brought installs but aren't exact-match bids yet.
     let converted: [AppleAdsIdeaDTO]
     /// Apple's keyword recommendations for the app, minus ones already bid.
@@ -219,7 +223,7 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
             rows.append(AppleAdsKeywordRowDTO(
                 keywordId: String(info.id), text: info.text, matchType: info.matchType, status: info.status,
                 campaignName: campaignNames[info.campaignId] ?? "", country: key.country,
-                bid: info.bid, suggestedBid: suggested[key]?.bid,
+                bid: info.bid, suggestedBid: suggested[key]?.bid, currency: info.currency,
                 metrics: AppleAdsMath.dto(metrics),
                 organicRank: rank, trackedKeywordId: match?.id,
                 alreadyRanksWell: rank.map { (1...Self.ranksWellThrough).contains($0) } ?? false
@@ -233,7 +237,7 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
 
     func bidIdeas(watchedAppId: UUID, days: Int) async throws -> AppleAdsBidIdeasDTO {
         let scope = try await scope(watchedAppId: watchedAppId, days: days)
-        guard let account = scope.account else { return AppleAdsBidIdeasDTO(converted: [], suggestions: [], wasted: []) }
+        guard let account = scope.account else { return AppleAdsBidIdeasDTO(currency: nil, converted: [], suggestions: [], wasted: []) }
         let period = scope.period.current
 
         let campaigns = try await repository.campaigns(adAccountId: account)
@@ -304,7 +308,10 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
         for w in wasted { wastedOut.append(try await idea(w.term, w.country, w.metrics)) }
         var suggestionsOut: [AppleAdsIdeaDTO] = []
         for s in suggestions { suggestionsOut.append(try await idea(s.text.lowercased(), s.country, nil)) }
-        return AppleAdsBidIdeasDTO(converted: convertedOut, suggestions: suggestionsOut, wasted: wastedOut)
+        return AppleAdsBidIdeasDTO(
+            currency: campaigns.lazy.compactMap(\.currency).first,
+            converted: convertedOut, suggestions: suggestionsOut, wasted: wastedOut
+        )
     }
 
     private static func matchKey(_ term: String, _ country: String) -> String {
