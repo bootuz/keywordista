@@ -31,8 +31,26 @@ struct AppleAdsOverviewDTO: Content, Equatable {
     let lastSync: AppleAdsSyncStatus
 }
 
+struct AppleAdsKeywordRowDTO: Content, Equatable {
+    let keywordId: String
+    let text: String
+    let matchType: String
+    let status: String
+    let campaignName: String
+    let country: String
+    let bid: Double?
+    let suggestedBid: Double?
+    let metrics: AppleAdsMetricsDTO
+    /// Latest organic rank of the tracked keyword with this term in this country.
+    let organicRank: Int?
+    let trackedKeywordId: UUID?
+    /// Organic rank 1–5: the paid tap may be one the app would have had anyway.
+    let alreadyRanksWell: Bool
+}
+
 protocol AppleAdsInsightsServiceProtocol: Sendable {
     func overview(watchedAppId: UUID, days: Int) async throws -> AppleAdsOverviewDTO
+    func keywords(watchedAppId: UUID, days: Int) async throws -> [AppleAdsKeywordRowDTO]
 }
 
 /// Reads the synced Apple Ads mirror for the Apple Ads screens. Never calls
@@ -40,10 +58,13 @@ protocol AppleAdsInsightsServiceProtocol: Sendable {
 struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
     let repository: any AppleAdsDataRepositoryProtocol
     let watchedApps: any WatchedAppRepositoryProtocol
+    let keywords: any KeywordRepositoryProtocol
+    let rankChecks: any RankCheckRepositoryProtocol
     let syncRunning: @Sendable () async -> Bool
     let today: @Sendable () -> String
 
     static let allowedDays: Set<Int> = [7, 30]
+    static let ranksWellThrough = 5
 
     func syncStatus() async throws -> AppleAdsSyncStatus {
         AppleAdsSyncStatus(
@@ -53,21 +74,34 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
         )
     }
 
-    func overview(watchedAppId: UUID, days: Int) async throws -> AppleAdsOverviewDTO {
+    /// The app, the synced account (nil before a first success) and the period.
+    private struct Scope {
+        let app: WatchedApp
+        let account: Int64?
+        let period: (current: ClosedRange<String>, previous: ClosedRange<String>)
+    }
+
+    private func scope(watchedAppId: UUID, days: Int) async throws -> Scope {
         guard Self.allowedDays.contains(days) else {
             throw Abort(.badRequest, reason: "days must be 7 or 30")
         }
         guard let app = try await watchedApps.find(id: watchedAppId) else {
             throw Abort(.notFound, reason: "App not found")
         }
-        let status = try await syncStatus()
         // The account is whichever one last synced; the sync deletes the rest.
         let account = try await repository.lastSuccessfulRun(adAccountId: nil)?.adAccountId
+        // Periods end at the newest synced day, not today: Apple's numbers
+        // for today are partial and would make every comparison look down.
         var end = today()
         if let account, let latest = try await repository.latestDate(adAccountId: account) { end = latest }
-        let period = AppleAdsMath.periods(endingAt: end, days: days)
+        return Scope(app: app, account: account, period: AppleAdsMath.periods(endingAt: end, days: days))
+    }
 
-        guard let account else {
+    func overview(watchedAppId: UUID, days: Int) async throws -> AppleAdsOverviewDTO {
+        let scope = try await scope(watchedAppId: watchedAppId, days: days)
+        let (app, period) = (scope.app, scope.period)
+        let status = try await syncStatus()
+        guard let account = scope.account else {
             return Self.emptyOverview(period: period, status: status)
         }
 
@@ -115,6 +149,66 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
             otherAppsCampaignCount: allCampaigns.count - campaigns.count,
             lastSync: status
         )
+    }
+
+    func keywords(watchedAppId: UUID, days: Int) async throws -> [AppleAdsKeywordRowDTO] {
+        let scope = try await scope(watchedAppId: watchedAppId, days: days)
+        guard let account = scope.account else { return [] }
+        let period = scope.period.current
+
+        let campaigns = try await repository.campaigns(adAccountId: account)
+            .filter { $0.appStoreId == scope.app.appStoreId }
+        let campaignNames = Dictionary(campaigns.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let infos = Dictionary(
+            try await repository.keywords(adAccountId: account)
+                .filter { campaignNames[$0.campaignId] != nil }
+                .map { ($0.id, $0) },
+            uniquingKeysWith: { a, _ in a }
+        )
+
+        struct Key: Hashable { let keywordId: Int64; let country: String }
+        var sums: [Key: AppleAdsMetrics] = [:]
+        var suggested: [Key: (date: String, bid: Double)] = [:]
+        for day in try await repository.keywordDays(adAccountId: account, from: period.lowerBound, to: period.upperBound)
+        where infos[day.keywordId] != nil {
+            let key = Key(keywordId: day.keywordId, country: day.country.uppercased())
+            sums[key, default: .zero] = sums[key, default: .zero] + day.metrics
+            if let bid = day.suggestedBid, day.date >= (suggested[key]?.date ?? "") {
+                suggested[key] = (day.date, bid)
+            }
+        }
+
+        // Tracked keywords by (lowercased term, uppercased country).
+        var tracked: [String: Keyword] = [:]
+        for keyword in try await keywords.all() {
+            tracked[Self.matchKey(keyword.term, keyword.countryCode)] = keyword
+        }
+
+        var rows: [AppleAdsKeywordRowDTO] = []
+        for (key, metrics) in sums {
+            guard let info = infos[key.keywordId] else { continue }
+            let match = tracked[Self.matchKey(info.text, key.country)]
+            var rank: Int?
+            if let match, let id = match.id, let appId = scope.app.id {
+                rank = try await rankChecks.latest(keywordID: id, watchedAppID: appId)?.rank
+            }
+            rows.append(AppleAdsKeywordRowDTO(
+                keywordId: String(info.id), text: info.text, matchType: info.matchType, status: info.status,
+                campaignName: campaignNames[info.campaignId] ?? "", country: key.country,
+                bid: info.bid, suggestedBid: suggested[key]?.bid,
+                metrics: AppleAdsMath.dto(metrics),
+                organicRank: rank, trackedKeywordId: match?.id,
+                alreadyRanksWell: rank.map { (1...Self.ranksWellThrough).contains($0) } ?? false
+            ))
+        }
+        return rows.sorted {
+            $0.metrics.spend != $1.metrics.spend ? $0.metrics.spend > $1.metrics.spend
+                : ($0.text, $0.country) < ($1.text, $1.country)
+        }
+    }
+
+    private static func matchKey(_ term: String, _ country: String) -> String {
+        term.trimmingCharacters(in: .whitespaces).lowercased() + "|" + country.uppercased()
     }
 
     private static func emptyOverview(

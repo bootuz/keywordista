@@ -8,6 +8,7 @@ struct AppleAdsController: RouteCollection {
         ads.post("sync", use: syncNow)
         ads.get("sync-status", use: syncStatus)
         ads.get("overview", use: overview)
+        ads.get("keywords", use: keywords)
     }
 
     @Sendable func syncNow(req: Request) async throws -> Response {
@@ -28,6 +29,13 @@ struct AppleAdsController: RouteCollection {
         return try await req.appleAdsInsightsService().overview(watchedAppId: query.appId, days: query.days ?? 30)
     }
 
+    @Sendable func keywords(req: Request) async throws -> [AppleAdsKeywordRowDTO] {
+        try await Self.requireConnected(req)
+        let query = try req.query.decode(OverviewQuery.self)
+        return try await req.appleAdsInsightsService().keywords(watchedAppId: query.appId, days: query.days ?? 30)
+    }
+
+    /// `appId` is the watched app's UUID; `days` is 7 or 30 (default 30).
     struct OverviewQuery: Content {
         let appId: UUID
         let days: Int?

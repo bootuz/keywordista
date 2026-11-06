@@ -3,24 +3,28 @@ import Foundation
 import Testing
 import Vapor
 
-@Suite("Apple Ads insights: overview")
+@Suite("Apple Ads insights: overview and keywords")
 struct AppleAdsInsightsServiceTests {
     static let app = AppleAdsFixtures.ownApp
 
     struct Harness {
         let service: AppleAdsInsightsService
         let repo: InMemoryAppleAdsDataRepository
+        let ranks: InMemoryRankCheckRepository
     }
 
-    static func harness(running: Bool = false) -> Harness {
+    static func harness(running: Bool = false, tracked: [Keyword] = []) -> Harness {
         let repo = InMemoryAppleAdsDataRepository()
+        let ranks = InMemoryRankCheckRepository()
         let service = AppleAdsInsightsService(
             repository: repo,
             watchedApps: InMemoryWatchedAppRepository([app]),
+            keywords: InMemoryKeywordRepository(tracked),
+            rankChecks: ranks,
             syncRunning: { running },
             today: { "2026-11-06" }
         )
-        return Harness(service: service, repo: repo)
+        return Harness(service: service, repo: repo, ranks: ranks)
     }
 
     /// Stores a successful sync of `snapshot` for account 42, like the sync does.
@@ -105,5 +109,88 @@ struct AppleAdsInsightsServiceTests {
         } throws: { error in
             (error as? any AbortError)?.status == .badRequest
         }
+    }
+
+    // MARK: Keywords
+
+    static let flashcards = AppleAdsKeywordInfo(id: 5, campaignId: 1, adGroupId: 2, text: "Flashcards", matchType: "EXACT", status: "ACTIVE", bid: 1.5, currency: "USD")
+
+    static func keywordDay(_ country: String, _ date: String, taps: Int, installs: Int, spend: Double, suggested: Double? = nil, keyword: Int64 = 5, campaign: Int64 = 1) -> AppleAdsKeywordDay {
+        AppleAdsKeywordDay(keywordId: keyword, campaignId: campaign, country: country, date: date, metrics: AppleAdsFixtures.metrics(taps: taps, installs: installs, spend: spend), suggestedBid: suggested)
+    }
+
+    static func keywordSnapshot(_ days: [AppleAdsKeywordDay]) -> AppleAdsSnapshot {
+        var snapshot = AppleAdsSnapshot()
+        let other = AppleAdsCampaignInfo(id: 2, appStoreId: 555, name: "Other app", status: "RUNNING", countries: ["US"], dailyBudget: 5, currency: "USD")
+        snapshot.campaigns = [AppleAdsFixtures.campaign, other]
+        snapshot.keywords = [flashcards, AppleAdsKeywordInfo(id: 9, campaignId: 2, adGroupId: 3, text: "other", matchType: "BROAD", status: "ACTIVE", bid: 1, currency: "USD")]
+        snapshot.campaignDays = [Self.day(1, "2026-11-05", taps: 1, installs: 0, spend: 1)]
+        snapshot.keywordDays = days
+        return snapshot
+    }
+
+    @Test("keyword rows sum the period per country, this app only, by spend")
+    func keywordRowsSumPeriodPerCountry() async throws {
+        let h = Self.harness()
+        try await Self.synced(h.repo, Self.keywordSnapshot([
+            Self.keywordDay("US", "2026-11-05", taps: 60, installs: 3, spend: 9),
+            Self.keywordDay("US", "2026-11-01", taps: 40, installs: 2, spend: 6),
+            Self.keywordDay("US", "2026-10-01", taps: 999, installs: 9, spend: 99), // outside 7 days
+            Self.keywordDay("DE", "2026-11-04", taps: 5, installs: 0, spend: 2),
+            Self.keywordDay("US", "2026-11-05", taps: 70, installs: 7, spend: 50, keyword: 9, campaign: 2),
+        ]))
+        let rows = try await h.service.keywords(watchedAppId: Self.app.id!, days: 7)
+        #expect(rows.map(\.country) == ["US", "DE"])
+        let us = try #require(rows.first)
+        #expect(us.keywordId == "5")
+        #expect(us.text == "Flashcards")
+        #expect(us.campaignName == "US Search")
+        #expect(us.bid == 1.5)
+        #expect(us.metrics.taps == 100)
+        #expect(us.metrics.spend == 15)
+        #expect(us.metrics.cpi == 3)
+    }
+
+    @Test("organic rank comes from the tracked keyword in the same country")
+    func organicRankMatchesCountry() async throws {
+        let us = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
+        let de = Keyword(id: UUID(), term: "Flashcards", countryCode: "de")
+        let h = Self.harness(tracked: [us, de])
+        try await h.ranks.save(RankCheck(keywordID: us.id!, watchedAppID: Self.app.id!, rank: 3, difficulty: 50, entryBarrier: 50, checkedAt: Date()))
+        try await h.ranks.save(RankCheck(keywordID: de.id!, watchedAppID: Self.app.id!, rank: 40, difficulty: 50, entryBarrier: 50, checkedAt: Date()))
+        try await Self.synced(h.repo, Self.keywordSnapshot([
+            Self.keywordDay("US", "2026-11-05", taps: 60, installs: 3, spend: 9),
+            Self.keywordDay("DE", "2026-11-05", taps: 5, installs: 0, spend: 2),
+        ]))
+        let rows = try await h.service.keywords(watchedAppId: Self.app.id!, days: 7)
+        let usRow = try #require(rows.first { $0.country == "US" })
+        let deRow = try #require(rows.first { $0.country == "DE" })
+        #expect(usRow.organicRank == 3)
+        #expect(usRow.alreadyRanksWell)
+        #expect(usRow.trackedKeywordId == us.id)
+        #expect(deRow.organicRank == 40)
+        #expect(!deRow.alreadyRanksWell)
+    }
+
+    @Test("a keyword that isn't tracked has no organic rank")
+    func untrackedKeywordHasNoRank() async throws {
+        let h = Self.harness(tracked: [Keyword(id: UUID(), term: "flashcards", countryCode: "gb")])
+        try await Self.synced(h.repo, Self.keywordSnapshot([Self.keywordDay("US", "2026-11-05", taps: 60, installs: 3, spend: 9)]))
+        let row = try #require(try await h.service.keywords(watchedAppId: Self.app.id!, days: 7).first)
+        #expect(row.organicRank == nil)
+        #expect(row.trackedKeywordId == nil)
+        #expect(!row.alreadyRanksWell)
+    }
+
+    @Test("the suggested bid is the most recent one Apple gave in the period")
+    func suggestedBidIsLatestDays() async throws {
+        let h = Self.harness()
+        try await Self.synced(h.repo, Self.keywordSnapshot([
+            Self.keywordDay("US", "2026-11-01", taps: 10, installs: 1, spend: 1, suggested: 1.1),
+            Self.keywordDay("US", "2026-11-03", taps: 10, installs: 1, spend: 1, suggested: 1.4),
+            Self.keywordDay("US", "2026-11-05", taps: 10, installs: 1, spend: 1, suggested: nil),
+        ]))
+        let row = try #require(try await h.service.keywords(watchedAppId: Self.app.id!, days: 7).first)
+        #expect(row.suggestedBid == 1.4)
     }
 }

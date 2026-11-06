@@ -72,6 +72,8 @@ extension Request {
         return AppleAdsInsightsService(
             repository: appleAdsDataRepository(),
             watchedApps: FluentWatchedAppRepository(db: db),
+            keywords: FluentKeywordRepository(db: db),
+            rankChecks: FluentRankCheckRepository(db: db),
             syncRunning: { await coordinator.isRunning },
             today: { Date().formatted(Date.ISO8601FormatStyle(timeZone: .gmt).year().month().day()) }
         )
