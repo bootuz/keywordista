@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { DashboardRow, WatchedApp, DeveloperKeywordsResponse, AppMetadataSnapshot, KeywordOpportunity } from './types';
-import { getDashboard, getRefreshStatus, getDeveloperKeywords, getOpportunity } from './api';
+import { getDashboard, getRefreshStatus, getDeveloperKeywords, getOpportunity, ApiError } from './api';
 
 // Shared UI state. Each store has a single owner (the component that calls
 // the matching `set` after an API call); other components subscribe read-only.
@@ -12,16 +12,34 @@ export const apps = writable<WatchedApp[]>([]);
 // the developerKeywords enrichment pattern.
 export const opportunityByKeyword = writable<Map<string, KeywordOpportunity>>(new Map());
 
+// Apple's reason when the opportunity column couldn't be filled (the server
+// answers 502 with readable copy, e.g. "pick an ad account"). Null otherwise.
+export const opportunityError = writable<string | null>(null);
+
 export async function refreshOpportunity(): Promise<void> {
   try {
     const rows = await getOpportunity();
     const map = new Map<string, KeywordOpportunity>();
     for (const row of rows) map.set(row.keywordId, row);
     opportunityByKeyword.set(map);
-  } catch {
-    // Non-fatal: ASA may be unconfigured, or the endpoint may 404 on an
-    // older server. The dashboard renders fine without the column.
+    opportunityError.set(null);
+  } catch (err) {
+    // Non-fatal: the dashboard renders fine without the column. Only an
+    // Apple Ads failure (502) is worth telling the user about; a 404 from an
+    // older server or a network blip stays silent.
+    opportunityError.set(err instanceof ApiError && err.status === 502 ? apiReason(err.body) : null);
   }
+}
+
+// Vapor error bodies are `{"error":true,"reason":"…"}`.
+function apiReason(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { reason?: unknown };
+    if (typeof parsed.reason === 'string' && parsed.reason) return parsed.reason;
+  } catch {
+    // Not JSON: fall through to the raw text.
+  }
+  return body || 'Apple Ads request failed.';
 }
 
 // ── Competitor analysis (v2) ────────────────────────────────────────────

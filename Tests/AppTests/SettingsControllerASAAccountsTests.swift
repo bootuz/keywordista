@@ -49,6 +49,23 @@ struct SettingsControllerASAAccountsTests {
         #expect(await transport.requests.isEmpty)
     }
 
+    @Test("disconnecting Apple Ads shuts the live client down")
+    func disconnectShutsDownClient() async throws {
+        let transport = StubAppleAdsTransport([
+            .init(status: .ok, json: #"{"result":{"acls":[{"adAccount":{"id":5,"name":"Main","orgId":1},"roles":["Admin"]}]}}"#),
+        ])
+        let session = Self.session(transport)
+        let app = try await SettingsTestApp.make(session: session)
+        defer { Task { await session.shutdown(); try? await app.asyncShutdown() } }
+
+        try await app.test(.PUT, "api/v1/settings/asa", beforeRequest: { req in
+            try req.content.encode(["clientId": "c", "clientSecret": "s"])
+        }, afterResponse: { res async in #expect(res.status == .ok) })
+        try await app.test(.GET, "api/v1/settings/asa/accounts", afterResponse: { res async in #expect(res.status == .ok) })
+        try await app.test(.DELETE, "api/v1/settings/asa", afterResponse: { res async in #expect(res.status == .noContent) })
+        #expect(await session.completedShutdowns == 1)
+    }
+
     @Test("Apple's 401 comes back as a 502 carrying the readable reason")
     func accountsEndpointSurfacesAppleAdsError() async throws {
         let transport = StubAppleAdsTransport([.init(status: .unauthorized, json: "{}")])

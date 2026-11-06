@@ -268,6 +268,49 @@ private actor StubASAClient: AppleSearchAdsClientProtocol {
     }
 }
 
+extension KeywordSuggestionServiceTests {
+    @Test("when every campaign's report fails, the error surfaces instead of empty suggestions")
+    func allReportsFailingThrows() async throws {
+        let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
+        let service = KeywordSuggestionService(
+            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
+            keywordRepo: InMemoryKeywordRepository([seed]),
+            rankCheckRepo: InMemoryRankCheckRepository(),
+            makeClient: { _ in ReportsFailingASAClient() },
+            now: { Date(timeIntervalSince1970: 1_700_000_000) },
+            logger: Logger(label: "t")
+        )
+        await #expect(throws: AppleAdsError.unreadableResponse("x")) { _ = try await service.suggest(seedKeywordId: seed.id!) }
+    }
+
+    @Test("one failing campaign still returns the others' suggestions")
+    func oneReportFailingIsTolerated() async throws {
+        let seed = Keyword(id: UUID(), term: "flashcards", countryCode: "us")
+        let service = KeywordSuggestionService(
+            settings: StubSettingsService(asa: .init(clientId: "c", clientSecret: "j", orgId: nil)),
+            keywordRepo: InMemoryKeywordRepository([seed]),
+            rankCheckRepo: InMemoryRankCheckRepository(),
+            makeClient: { _ in ReportsFailingASAClient(failing: [1]) },
+            now: { Date(timeIntervalSince1970: 1_700_000_000) },
+            logger: Logger(label: "t")
+        )
+        let result = try await service.suggest(seedKeywordId: seed.id!)
+        #expect(result.rows.map(\.term) == ["flashcards app"])
+    }
+}
+
+private struct ReportsFailingASAClient: AppleSearchAdsClientProtocol {
+    var failing: Set<Int64> = [1, 2]
+    func listCampaigns() async throws -> [ASACampaign] {
+        [ASACampaign(id: 1, name: "US-A", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
+         ASACampaign(id: 2, name: "US-B", countriesOrRegions: ["US"], displayStatus: "RUNNING")]
+    }
+    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
+        if failing.contains(campaignId) { throw AppleAdsError.unreadableResponse("x") }
+        return [.init(text: "flashcards app", source: "AUTO", impressions: 500, taps: 10, ttr: 0.02, localSpend: 0)]
+    }
+}
+
 private struct FailingASAClient: AppleSearchAdsClientProtocol {
     func listCampaigns() async throws -> [ASACampaign] {
         throw AppleAdsError.unauthorized

@@ -5,6 +5,7 @@ import HTTPTypes
 import Logging
 import OpenAPIRuntime
 import Testing
+import Vapor
 
 @Suite("AppleAdsPlatformClient (Platform API v1)")
 struct AppleAdsPlatformClientTests {
@@ -232,6 +233,16 @@ struct AppleAdsPlatformClientTests {
             return (error as? AppleAdsError)?.description.contains("couldn't read") == true
         }
         await session.shutdown()
+    }
+}
+
+extension AppleAdsPlatformClientTests {
+    @Test("every Apple Ads error reaches any route as a 502 with its copy, never a 500 or 401")
+    func appleAdsErrorsAreBadGateway() {
+        let error: any AbortError = AppleAdsError.adAccountSelectionRequired([])
+        #expect(error.status == .badGateway)
+        #expect(error.reason == AppleAdsError.adAccountSelectionRequired([]).description)
+        #expect((AppleAdsError.unauthorized as any AbortError).status == .badGateway)
     }
 }
 

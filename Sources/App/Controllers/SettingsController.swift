@@ -116,30 +116,29 @@ struct SettingsController: RouteCollection {
             clientId: clientId,
             clientSecret: resolvedSecret,
             orgId: payload.orgId?.trimmingCharacters(in: .whitespacesAndNewlines),
+            // A different client ID is a different API user, whose ad accounts
+            // the stored choice may not belong to: drop it unless one is sent.
             adAccountId: payload.adAccountId.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                ?? existing?.adAccountId
+                ?? (existing?.clientId == clientId ? existing?.adAccountId : nil)
         ))
         return try await service.getASAStatus()
     }
 
     /// Ad accounts the stored credentials can reach, for the settings picker.
     ///
-    /// Why Apple's failures map to 502 rather than their own status: the
-    /// SPA treats any 401 as "your Keywordista session expired" and sends
-    /// the user to /login, which is wrong when it's Apple rejecting the key.
+    /// Apple's failures come back as 502 via `AppleAdsError: AbortError`.
     @Sendable func listASAAccounts(req: Request) async throws -> [ASAAdAccount] {
         guard let credentials = try await req.settingsService().getASACredentials() else {
             throw Abort(.conflict, reason: "Connect Apple Ads first")
         }
-        do {
-            return try await req.appleAdsClient(for: credentials).listAdAccounts()
-        } catch let failure as AppleAdsError {
-            throw Abort(.badGateway, reason: failure.description)
-        }
+        return try await req.appleAdsClient(for: credentials).listAdAccounts()
     }
 
     @Sendable func deleteASA(req: Request) async throws -> HTTPStatus {
         try await req.settingsService().clearASACredentials()
+        // Disconnect means stop using the key now: the live client would
+        // otherwise keep refreshing OAuth tokens with it until a restart.
+        await req.application.appleAdsSession.shutdown()
         return .noContent
     }
 }

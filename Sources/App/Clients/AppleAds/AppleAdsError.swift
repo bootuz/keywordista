@@ -102,3 +102,12 @@ enum AppleAdsError: Error, Equatable, CustomStringConvertible {
         return path.isEmpty ? context.debugDescription : "unexpected value at \(path)"
     }
 }
+
+/// Any route that lets an `AppleAdsError` escape answers 502 with the copy.
+/// Why 502 and never Apple's own status: the SPA treats every 401 as "your
+/// Keywordista session expired" and sends the user to /login, and a 500
+/// would hide the reason (the dashboard's opportunity call used to).
+extension AppleAdsError: AbortError {
+    var status: HTTPResponseStatus { .badGateway }
+    var reason: String { description }
+}

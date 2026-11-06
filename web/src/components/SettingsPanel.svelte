@@ -213,8 +213,10 @@
         clientId: asaClientId,
         ...(includeSecret ? { clientSecret: asaClientSecret } : {}),
         orgId: asaOrgId || undefined,
-        // Only send a choice the user could actually see; otherwise keep the stored one.
-        ...(asaAccounts ? { adAccountId: asaAdAccountId } : {}),
+        // Only send a choice the user could see, and only for the same API
+        // user: a new client ID's accounts haven't been listed yet, and the
+        // server drops the old choice when the client ID changes.
+        ...(asaAccounts && asaClientId.trim() === (asaStatus?.clientId ?? '') ? { adAccountId: asaAdAccountId } : {}),
       });
       asaClientSecret = '';
       asaReplacingSecret = false;

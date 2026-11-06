@@ -99,18 +99,19 @@ struct KeywordSuggestionService: KeywordSuggestionServiceProtocol {
         let startDate = endDate.addingTimeInterval(-TimeInterval(Self.reportWindowDays * 86_400))
 
         var all: [ASASearchTerm] = []
-        try await withThrowingTaskGroup(of: [ASASearchTerm].self) { group in
+        var failures: [any Error] = []
+        try await withThrowingTaskGroup(of: Result<[ASASearchTerm], any Error>.self) { group in
             for campaign in relevant {
                 let c = client
                 let id = campaign.id
                 let log = logger
                 group.addTask {
                     do {
-                        return try await c.searchTermsReport(
+                        return .success(try await c.searchTermsReport(
                             campaignId: id,
                             startDate: startDate,
                             endDate: endDate
-                        )
+                        ))
                     } catch {
                         // Don't let one bad campaign kill the whole panel —
                         // log and continue. The UI shows what we did get.
@@ -119,12 +120,20 @@ struct KeywordSuggestionService: KeywordSuggestionServiceProtocol {
                         // the catch swallowed errors silently, which made
                         // ASA-side failures invisible.)
                         log.warning("ASA searchterms failed: campaign=\(id) error=\(error)")
-                        return []
+                        return .failure(error)
                     }
                 }
             }
-            for try await rows in group { all.append(contentsOf: rows) }
+            for try await result in group {
+                switch result {
+                case .success(let rows): all.append(contentsOf: rows)
+                case .failure(let error): failures.append(error)
+                }
+            }
         }
+        // If every report failed, an empty panel would read as "no related
+        // terms"; surface the reason instead (it reaches the UI as a 502).
+        if failures.count == relevant.count, let first = failures.first { throw first }
         if all.isEmpty { return Self.empty }
 
         // (5a) Partition out Apple's anonymized placeholder rows BEFORE the

@@ -43,10 +43,25 @@ struct SettingsServiceASATests {
             try req.content.encode(["clientId": "c", "clientSecret": "s", "adAccountId": "123"])
         }, afterResponse: { res async in #expect(res.status == .ok) })
         try await app.test(.PUT, "api/v1/settings/asa", beforeRequest: { req in
-            try req.content.encode(["clientId": "c2"])
+            try req.content.encode(["clientId": "c", "clientSecret": "rotated"])
         }, afterResponse: { res async throws in
             #expect(res.status == .ok)
             #expect(try res.content.decode(ASAStatus.self).adAccountId == "123")
+        })
+    }
+
+    @Test("PUT with a different client ID drops the old API user's ad account")
+    func putWithNewClientIdClearsAdAccount() async throws {
+        let app = try await SettingsTestApp.make()
+        defer { Task { try? await app.asyncShutdown() } }
+        try await app.test(.PUT, "api/v1/settings/asa", beforeRequest: { req in
+            try req.content.encode(["clientId": "c", "clientSecret": "s", "adAccountId": "123"])
+        }, afterResponse: { res async in #expect(res.status == .ok) })
+        try await app.test(.PUT, "api/v1/settings/asa", beforeRequest: { req in
+            try req.content.encode(["clientId": "other", "clientSecret": "s2"])
+        }, afterResponse: { res async throws in
+            #expect(res.status == .ok)
+            #expect(try res.content.decode(ASAStatus.self).adAccountId == nil)
         })
     }
 }
