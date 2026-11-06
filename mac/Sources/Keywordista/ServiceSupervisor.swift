@@ -260,7 +260,7 @@ final class ServiceSupervisor: ObservableObject {
     //
     // Two installs can exist side by side:
     //   • downloaded — <dataDir>/service/, written by UpdateChecker when the
-    //     user applies a `service-v*` release
+    //     user applies a `server-v*` release
     //   • bundled    — <Bundle>/Contents/Resources/, sealed into the .app by
     //     build-dmg.sh / build-app.sh
     //
@@ -299,7 +299,7 @@ final class ServiceSupervisor: ObservableObject {
     /// server reports its own version, the updater re-offers anything newer,
     /// and the re-applied download gets a marker.
     ///
-    /// Ties go to the bundle. Its marker is the newest stable `service-v*`
+    /// Ties go to the bundle. Its marker is the newest stable `server-v*`
     /// tag reachable from the commit the DMG was built from, so it carries
     /// at least that release's code and often unreleased fixes on top.
     nonisolated static func chooseServiceInstall(

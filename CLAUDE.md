@@ -61,7 +61,7 @@ make dmg                   # signed + notarized DMG (releases/)
 make dmg-unsigned          # skip signing — fast local validation
 ```
 
-Release flows for the three artifacts live in `.github/workflows/` (`release-app.yml`, `release-service.yml`, `release-image.yml`) and are triggered by tag pushes (`app-v*`, `service-v*`).
+Release flows for the three artifacts live in `.github/workflows/` (`release-app.yml`, `release-service.yml`, `release-image.yml`) and are triggered by tag pushes (`app-v*`, `server-v*`, `image-v*`). `service-v*` is the frozen macOS 13+ server channel: never tag it again, since older menubar builds would install a macOS-15-only server from it.
 
 ## Architecture: server (`Sources/App/`)
 

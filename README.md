@@ -123,7 +123,7 @@ cd web && npm run check    # svelte-check + tsc
 
 Three layers: the Vapor server in `Sources/App/`, the Svelte 5 + Tailwind SPA in `web/`, and the SwiftUI `MenuBarExtra` app in `mac/`. Build outputs land in `Public/` (SPA) and `mac/Keywordista.app/` (menu-bar bundle).
 
-Cutting a signed + notarized DMG: see [`.github/RELEASING.md`](.github/RELEASING.md). Tagged pushes (`app-v*`, `service-v*`) run the same release flow in CI.
+Cutting a signed + notarized DMG: see [`.github/RELEASING.md`](.github/RELEASING.md). Tagged pushes (`app-v*`, `server-v*`) run the same release flow in CI.
 
 ---
 

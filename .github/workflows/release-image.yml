@@ -2,7 +2,7 @@ name: Release Image
 
 # Builds and publishes the server Docker image to GHCR when an `image-v*`
 # tag is pushed. Joins release-app.yml (`app-v*` → DMG) and
-# release-service.yml (`service-v*` → menubar service .zip) as the third
+# release-service.yml (`server-v*` → menubar service .zip) as the third
 # tag stream — they're versioned independently because the image
 # (server-side) and the macOS bundle (client-side) evolve on different
 # cadences and target different audiences.

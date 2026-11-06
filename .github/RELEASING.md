@@ -7,9 +7,11 @@ There are two release streams that ship independently:
 | Tag pattern | What gets built | Workflow |
 |---|---|---|
 | `app-v0.1.0` | `Keywordista-0.1.0.dmg` (the menubar app + bundled service) | [`release-app.yml`](workflows/release-app.yml) |
-| `service-v0.1.0` | `keywordista-service-0.1.0.zip` (the Vapor server + SPA) — consumed by the menubar app's in-app updater | [`release-service.yml`](workflows/release-service.yml) |
+| `server-v0.8.0` | `keywordista-service-0.8.0.zip` (the Vapor server + SPA) — consumed by the menubar app's in-app updater | [`release-service.yml`](workflows/release-service.yml) |
 
 Both workflows use the same five secrets — set them once and both pipelines work.
+
+> **`service-v*` is frozen.** Server releases moved to `server-v*` when the server started requiring macOS 15 (Apple Ads Platform API v1 client). Menubar builds already installed on macOS 13/14 poll `service-v*` and would install a server that can't launch, so never push a `service-v*` tag again. The last one is `service-v0.7.0`.
 
 ## One-time setup
 
@@ -71,8 +73,8 @@ Takes ~5–8 minutes end to end.
 Service releases are the same idea but for the Vapor binary + SPA that the menubar app's in-app updater consumes:
 
 ```bash
-git tag service-v0.1.0
-git push origin service-v0.1.0
+git tag server-v0.8.0
+git push origin server-v0.8.0
 ```
 
 The workflow:
@@ -84,19 +86,19 @@ The workflow:
 6. Submits the .zip to Apple notarization — the **binary's signature** gets notarized; the .zip wrapper is just for transport. No stapling (unsupported on .zip), but the menubar app's `UpdateChecker` does `codesign --verify` after extraction, which is sufficient.
 7. Creates a GitHub Release with the .zip + SHA-256 sidecar.
 
-End users don't download these directly — the menubar app polls for `service-v*` releases and applies them in-place via the **Apply Update** menu item.
+End users don't download these directly — the menubar app polls for `server-v*` releases and applies them in-place via the **Apply Update** menu item.
 
 ### When to cut which release
 
 | Change | Tag |
 |---|---|
-| Backend logic (Vapor server, SPA, scoring heuristic, refresh job) | `service-vN.N.N` |
+| Backend logic (Vapor server, SPA, scoring heuristic, refresh job) | `server-vN.N.N` |
 | Menubar app UI / supervisor / update flow itself | `app-vN.N.N` |
 | First-time install needs the bundled fallback updated too | `app-vN.N.N` (re-bundles the latest service) |
 
-The app's bundled fallback service binary is whatever was on `main` at the time the app DMG was built. After install, the menubar app upgrades to whatever `service-v*` is newer than its bundled fallback. So users always get the latest service eventually, even if they only ever download the .dmg once.
+The app's bundled fallback service binary is whatever was on `main` at the time the app DMG was built. After install, the menubar app upgrades to whatever `server-v*` is newer than its bundled fallback. So users always get the latest service eventually, even if they only ever download the .dmg once.
 
-The workflow stamps the bundled server with the newest stable `service-v*` tag reachable from the build commit, and both the bundle and each applied update carry a `keywordista-server.version` marker next to the binary. On launch the menubar app runs whichever of the two is newer (ties go to the bundle), so installing a newer DMG over an older downloaded update takes effect immediately.
+The workflow stamps the bundled server with the newest stable `server-v*` (or, before the first one, `service-v*`) tag reachable from the build commit, and both the bundle and each applied update carry a `keywordista-server.version` marker next to the binary. On launch the menubar app runs whichever of the two is newer (ties go to the bundle), so installing a newer DMG over an older downloaded update takes effect immediately.
 
 ## Dry-run testing
 
