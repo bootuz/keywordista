@@ -8,8 +8,9 @@
     getASASettings,
     putASASettings,
     deleteASASettings,
+    getASAAccounts,
   } from '../lib/api';
-  import type { ASCStatus, ASAStatus } from '../lib/types';
+  import type { ASCStatus, ASAStatus, ASAAdAccount } from '../lib/types';
   import { loadTheme, setTheme, type Theme } from '../lib/theme';
   import ThemePicker from './ThemePicker.svelte';
   import {
@@ -90,7 +91,13 @@
   let asaStatus = $state<ASAStatus | null>(null);
   let asaClientId = $state('');
   let asaClientSecret = $state('');
+  // Kept and sent back unchanged: it's the v5 org ID, which the server uses
+  // to pick an ad account automatically for users who set it up before v1.
   let asaOrgId = $state('');
+  let asaAdAccountId = $state('');
+  let asaAccounts = $state<ASAAdAccount[] | null>(null);
+  let asaAccountsLoading = $state(false);
+  let asaAccountsError = $state<string | null>(null);
   let asaReplacingSecret = $state(false);
   let asaBusy = $state(false);
   let asaError = $state<string | null>(null);
@@ -118,7 +125,9 @@
       asaStatus = await getASASettings();
       asaClientId = asaStatus.clientId ?? '';
       asaOrgId = asaStatus.orgId ?? '';
+      asaAdAccountId = asaStatus.adAccountId ?? '';
       if (!asaStatus.configured) asaExpanded = true;
+      else if (canMutateSettings) void loadASAAccounts();
     } catch (e) {
       asaError = e instanceof Error ? e.message : String(e);
     }
@@ -177,6 +186,19 @@
     }
   }
 
+  async function loadASAAccounts() {
+    asaAccountsLoading = true;
+    asaAccountsError = null;
+    try {
+      asaAccounts = await getASAAccounts();
+    } catch (err) {
+      asaAccounts = null;
+      asaAccountsError = err instanceof Error ? err.message : String(err);
+    } finally {
+      asaAccountsLoading = false;
+    }
+  }
+
   async function saveASA(e: Event) {
     e.preventDefault();
     asaBusy = true;
@@ -191,10 +213,15 @@
         clientId: asaClientId,
         ...(includeSecret ? { clientSecret: asaClientSecret } : {}),
         orgId: asaOrgId || undefined,
+        // Only send a choice the user could see, and only for the same API
+        // user: a new client ID's accounts haven't been listed yet, and the
+        // server drops the old choice when the client ID changes.
+        ...(asaAccounts && asaClientId.trim() === (asaStatus?.clientId ?? '') ? { adAccountId: asaAdAccountId } : {}),
       });
       asaClientSecret = '';
       asaReplacingSecret = false;
       asaMessage = 'Saved.';
+      void loadASAAccounts();
     } catch (err) {
       asaError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -203,7 +230,7 @@
   }
 
   async function clearASA() {
-    if (!confirm('Disconnect the Apple Search Ads integration?')) return;
+    if (!confirm('Disconnect Apple Ads?')) return;
     asaBusy = true;
     asaError = null;
     try {
@@ -212,6 +239,9 @@
       asaClientId = '';
       asaClientSecret = '';
       asaOrgId = '';
+      asaAdAccountId = '';
+      asaAccounts = null;
+      asaAccountsError = null;
       asaMessage = 'Disconnected.';
     } catch (err) {
       asaError = err instanceof Error ? err.message : String(err);
@@ -497,7 +527,7 @@
             >
               <polyline points="9 6 15 12 9 18" />
             </svg>
-            <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Search Ads API</h3>
+            <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Ads API</h3>
           </span>
           {#if asaStatus?.configured}
             <span class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
@@ -522,7 +552,7 @@
       {:else}
         <!-- Member view (server mode): see ASC section above for rationale. -->
         <div class="flex w-full items-center justify-between gap-2">
-          <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Search Ads API</h3>
+          <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Apple Ads API</h3>
           {#if asaStatus?.configured}
             <span class="text-xs text-emerald-600 dark:text-emerald-400">Connected</span>
           {:else}
@@ -536,17 +566,18 @@
       {#if asaExpanded && canMutateSettings}
         <div id="asa-section-body" class="mt-3" transition:slide={{ duration: 200 }}>
       <p class="mb-3 text-xs text-zinc-500">
-        Used for keyword suggestions for any app. Create a Search Ads account at
-        <code class="rounded bg-zinc-800 px-1 text-zinc-300">searchads.apple.com</code>. See Apple's
+        Used for keyword suggestions and opportunity scores. In
+        <code class="rounded bg-zinc-800 px-1 text-zinc-300">ads.apple.com</code>, create an API user
+        and its client credentials; Apple's
         <a
-          href="https://developer.apple.com/documentation/apple_ads/implementing-oauth-for-the-apple-search-ads-api"
+          href="https://developer.apple.com/documentation/apple-ads-platform-api/implementing-oauth-for-the-apple-ads-platform-api"
           target="_blank"
           rel="noopener noreferrer"
           class="text-amber-400 hover:underline"
         >
-          OAuth setup guide&nbsp;↗
+          OAuth guide&nbsp;↗
         </a>
-        for the Client ID / Client Secret details.
+        explains the Client ID and Client Secret.
       </p>
 
       <form onsubmit={saveASA} class="space-y-3">
@@ -588,15 +619,31 @@
           {/if}
         </div>
 
-        <label class="block space-y-1">
-          <span class="text-xs uppercase tracking-wide text-zinc-500">Org ID (optional)</span>
-          <input
-            type="text"
-            placeholder="12345"
-            bind:value={asaOrgId}
-            class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none"
-          />
-        </label>
+        {#if asaStatus?.configured}
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-wide text-zinc-500">Ad account</span>
+            {#if asaAccounts}
+              <select
+                bind:value={asaAdAccountId}
+                class="w-full rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none"
+              >
+                <option value="">Automatic{asaAccounts.length === 1 ? ` (${asaAccounts[0].name})` : ''}</option>
+                {#each asaAccounts as account (account.id)}
+                  <option value={account.id}>{account.name || account.id} · {account.id}</option>
+                {/each}
+              </select>
+              {#if asaAccounts.length > 1 && !asaAdAccountId}
+                <p class="text-xs text-amber-600 dark:text-amber-400">
+                  These credentials reach {asaAccounts.length} ad accounts. Pick the one that runs your app's campaigns.
+                </p>
+              {/if}
+            {:else if asaAccountsLoading}
+              <p class="text-xs text-zinc-500">Loading ad accounts…</p>
+            {:else if asaAccountsError}
+              <p class="text-xs text-red-600 dark:text-red-400">{asaAccountsError}</p>
+            {/if}
+          </label>
+        {/if}
 
         {#if asaError}<p class="text-sm text-red-600 dark:text-red-400">{asaError}</p>{/if}
         {#if asaMessage}<p class="text-sm text-emerald-600 dark:text-emerald-400">{asaMessage}</p>{/if}

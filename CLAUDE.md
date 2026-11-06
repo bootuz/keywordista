@@ -15,6 +15,8 @@ The tree is split into four layers, each with its own build system:
 | SwiftUI menubar shell | `mac/` | separate `mac/Package.swift` | `Keywordista.app` (wraps server + SPA) |
 | MCP server (TypeScript) | `mcp/` | `npm` + `tsc` | `mcp/dist/index.js` (stdio) |
 
+Toolchain floor: Swift 6.2 (Xcode 26) with Swift 5 language mode, macOS 15 for both the server and the menubar app. The floor comes from Apple's `apple-ads-platform-api-swift` package, which declares it statically.
+
 The `mac/` SPM package is intentionally separate so the macOS-only SwiftUI deps don't bleed into the cross-platform server build. Reference deploy manifests (docker-compose + Caddy + Litestream, Render, Fly, Kubernetes, Nomad) live in `deploy/`; ops docs in `docs/deploy/` and `docs/architecture/`.
 
 ## Common commands
@@ -59,7 +61,7 @@ make dmg                   # signed + notarized DMG (releases/)
 make dmg-unsigned          # skip signing — fast local validation
 ```
 
-Release flows for the three artifacts live in `.github/workflows/` (`release-app.yml`, `release-service.yml`, `release-image.yml`) and are triggered by tag pushes (`app-v*`, `service-v*`).
+Release flows for the three artifacts live in `.github/workflows/` (`release-app.yml`, `release-service.yml`, `release-image.yml`) and are triggered by tag pushes (`app-v*`, `server-v*`, `image-v*`). `service-v*` is the frozen macOS 13+ server channel: never tag it again, since older menubar builds would install a macOS-15-only server from it.
 
 ## Architecture: server (`Sources/App/`)
 
@@ -74,7 +76,7 @@ Controllers/   ←  thin HTTP shells, call services
 
 Other directories:
 - `Domain/` — pure functions with no I/O: `KeywordScorer` (difficulty + entry barrier), `OpportunityScore`, `CompetitorGapClassifier`, `MetadataLinter`. Keep scoring formulas here so the dashboard and MCP never duplicate them.
-- `Clients/` — external APIs: App Store Connect, Apple Search Ads, iTunes charts RSS. (The iTunes search/lookup clients and the App Store HTML scraper live in `Services/`.)
+- `Clients/` — external APIs: App Store Connect, Apple Ads, iTunes charts RSS. (The iTunes search/lookup clients and the App Store HTML scraper live in `Services/`.)
 - `Auth/` — users, sessions, invites, middleware (server mode only; see below).
 - `Crypto/` — `SecretBox` encrypts stored ASC/ASA credentials at rest.
 - `Jobs/` — queue jobs and schedulers. `Commands/` — CLI subcommands (`createsuperuser`).
@@ -83,7 +85,7 @@ Other directories:
 
 `RefreshService` runs one iTunes search per keyword (top 200), then writes a `RankCheck` for **every** watched app, own *and* competitor, because competitor ranks come from the same results array at no extra iTunes cost and the gap view depends on them. It also saves the top 5 results as `TopResultSnapshot` rows, which feed the scorer. `WatchedApp.kind` (`own` / `competitor`) controls where an app appears: `DashboardService` shows only `.own`, and `ChartTrackerService` skips competitors (charts would cost an extra iTunes request per app).
 
-Difficulty and entry barrier are frozen into each `RankCheck` when it's written, so changing the scorer never rewrites history. The opportunity score is `ASA impressions ÷ difficulty` and exists only for keywords that appear in the user's Apple Search Ads reports; there's no estimated popularity on purpose (see `docs/specs/popularity-spike-decision.md`).
+Difficulty and entry barrier are frozen into each `RankCheck` when it's written, so changing the scorer never rewrites history. The opportunity score is `ASA impressions ÷ difficulty` and exists only for keywords that appear in the user's Apple Ads search-term reports; there's no estimated popularity on purpose (see `docs/specs/popularity-spike-decision.md`).
 
 ### Composition root
 
@@ -94,6 +96,16 @@ When adding a new service:
 2. Add a factory in `Container.swift` — `extension Request { func myService() -> any MyServiceProtocol }`.
 3. Controllers/jobs depend on the protocol only.
 4. Tests use `Tests/AppTests/Support/InMemoryRepositories.swift` (in-memory `actor` fakes) — follow the existing pattern.
+
+### Apple Ads (Platform API v1)
+
+`Clients/AppleAds/` wraps Apple's `AppleAdsClient` package (`apple-ads-platform-api-swift`, pinned exact) behind `AppleSearchAdsClientProtocol`, so the suggestion, popularity and opportunity services never see v1 types.
+- `AppleAdsSession` (an actor on `Application`, created in `configure.swift`) owns one live client per credential set, runs its `ServiceLifecycle` service, and shuts the old one down when credentials change. Build clients through it (`req.appleAdsClient(for:)`), never directly: each `AppleAdsClient` holds an HTTP client that must be shut down.
+- Every data call needs `X-AP-Context: adAccountId=…`. `AppleAdsPlatformClient.resolveAdAccountId()` uses the saved `asa.adAccountId`, else the only ACL account, else the one matching the legacy v5 `orgId`, else throws `adAccountSelectionRequired` so the user picks in Settings. Never guess between accounts.
+- `AppleAdsRetryMiddleware` retries 429s only for GETs and `…/query` POSTs. Writes must surface the 429.
+- Failures become `AppleAdsError`, whose `description` is user-facing copy. It conforms to `AbortError` as a 502 (never 401, because the SPA sends every 401 to `/login`), so controllers just let it escape. The suggestion and popularity services tolerate one failing campaign report but rethrow when all of them fail, so an empty result never hides an Apple error.
+- Disconnecting Apple Ads (`DELETE /settings/asa`) shuts the session down; changing the client ID drops the stored ad account.
+- The generated `Client` type clashes with Vapor's; refer to it as `AppleAdsAPI` (a typealias in a Vapor-free file).
 
 ### Database driver routing (load-bearing)
 

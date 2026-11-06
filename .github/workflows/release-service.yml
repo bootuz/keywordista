@@ -1,12 +1,17 @@
 name: Release Service
 
 # Cuts a signed + notarized service .zip (Vapor binary + Public/) and
-# publishes it to GitHub Releases when a service-v* tag is pushed. The
+# publishes it to GitHub Releases when a server-v* tag is pushed. The
 # menubar app's UpdateChecker (5d) polls the GitHub Releases API for
-# `service-v*` tags, downloads the .zip, verifies the contained binary's
+# `server-v*` tags, downloads the .zip, verifies the contained binary's
 # signature with `codesign --verify` pinned to our Developer ID team
 # (UpdateChecker.releaseCodeRequirement), and atomically swaps it into
 # ~/Library/Application Support/Keywordista/service/.
+#
+# Why `server-v*` and not the old `service-v*`: from the Apple Ads v1
+# migration on, the server needs macOS 15. Menubar builds already in the
+# field (macOS 13+) poll `service-v*` and would install a binary that can't
+# launch, so that channel is frozen at service-v0.7.x. Never tag it again.
 #
 # Notarization binds to the binary's signature — not to the .zip wrapper —
 # so we don't (and can't) staple a ticket onto the .zip. Apple's online
@@ -18,7 +23,7 @@ name: Release Service
 on:
   push:
     tags:
-      - 'service-v*'
+      - 'server-v*'
   workflow_dispatch:
     inputs:
       version:
@@ -40,12 +45,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select Xcode with Swift 6.2+
+        # apple/apple-ads-platform-api-swift needs swift-tools 6.2. Pick the
+        # newest Xcode 26 on the runner instead of trusting the image
+        # default, and fail loudly if the image ever drops it.
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$XC" ]; then
+            echo "::error::No Xcode 26 (Swift 6.2+) on this runner"; ls -d /Applications/Xcode*.app; exit 1
+          fi
+          sudo xcode-select -s "$XC"
+          swift --version
+
       - name: Determine version
         id: version
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
-            VERSION="${TAG#service-v}"
+            VERSION="${TAG#server-v}"
           else
             VERSION="${{ inputs.version }}"
           fi
@@ -228,12 +245,12 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           # M3.18: pre-release detection. Any SemVer pre-release marker
           # (-beta1, -rc.2, -alpha, etc.) flags the GitHub release as
-          # pre-release. Without this, even "service-v0.5.0-beta1"
+          # pre-release. Without this, even "server-v0.8.0-beta1"
           # would be marked "Latest" and UpdateChecker.swift's
           # M3.18 filter — which trusts release.prerelease — would
           # incorrectly auto-prompt stable users.
           PRERELEASE_FLAG=""
-          VERSION="${TAG#service-v}"
+          VERSION="${TAG#server-v}"
           if [[ "$VERSION" == *-* ]]; then
             PRERELEASE_FLAG="--prerelease"
             echo "→ tag '$TAG' has a pre-release suffix; marking GitHub release as pre-release"

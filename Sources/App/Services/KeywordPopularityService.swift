@@ -39,7 +39,8 @@ struct KeywordPopularityService: KeywordPopularityServiceProtocol {
         // same approximation KeywordSuggestionService makes.
         // byCountryTerm[COUNTRY_UPPER][term_lower] = summed impressions.
         var byCountryTerm: [String: [String: Int]] = [:]
-        try await withThrowingTaskGroup(of: (campaign: ASACampaign, rows: [ASASearchTerm]).self) { group in
+        var failures: [any Error] = []
+        try await withThrowingTaskGroup(of: (campaign: ASACampaign, rows: [ASASearchTerm], error: (any Error)?).self) { group in
             for campaign in campaigns {
                 let client = client
                 let log = logger
@@ -48,14 +49,15 @@ struct KeywordPopularityService: KeywordPopularityServiceProtocol {
                     do {
                         return (cam, try await client.searchTermsReport(
                             campaignId: cam.id, startDate: startDate, endDate: endDate,
-                        ))
+                        ), nil)
                     } catch {
                         log.warning("ASA searchterms failed: campaign=\(cam.id) error=\(error)")
-                        return (cam, [])
+                        return (cam, [], error)
                     }
                 }
             }
-            for try await (campaign, rows) in group {
+            for try await (campaign, rows, error) in group {
+                if let error { failures.append(error) }
                 for row in rows where row.text.uppercased() != "LOW_VOLUME" {
                     let term = row.text.lowercased()
                     for country in campaign.countriesOrRegions {
@@ -64,6 +66,10 @@ struct KeywordPopularityService: KeywordPopularityServiceProtocol {
                 }
             }
         }
+
+        // One bad campaign shouldn't blank the column, but if every report
+        // failed the empty result would read as "no demand": say why instead.
+        if !campaigns.isEmpty, failures.count == campaigns.count, let first = failures.first { throw first }
 
         // Join tracked keywords → impressions for their (term, country).
         var out: [UUID: Int] = [:]

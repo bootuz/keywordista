@@ -34,8 +34,8 @@ final class UpdateCheckerPreReleaseTests: XCTestCase {
         // GitHub Releases has stable v0.4.0 + the about-to-tag
         // beta v0.5.0-beta1. UpdateChecker MUST pick v0.4.0.
         let releases = [
-            release(tag: "service-v0.4.0", prerelease: false),
-            release(tag: "service-v0.5.0-beta1", prerelease: true),
+            release(tag: "server-v0.4.0", prerelease: false),
+            release(tag: "server-v0.5.0-beta1", prerelease: true),
         ]
         let picked = UpdateChecker.pickLatestStableRelease(from: releases)
         XCTAssertEqual(picked?.version, "0.4.0",
@@ -44,10 +44,10 @@ final class UpdateCheckerPreReleaseTests: XCTestCase {
 
     func testPicksHighestStableWhenMultipleExist() {
         let releases = [
-            release(tag: "service-v0.3.0", prerelease: false),
-            release(tag: "service-v0.4.2", prerelease: false),
-            release(tag: "service-v0.4.0", prerelease: false),
-            release(tag: "service-v0.5.0-beta1", prerelease: true),
+            release(tag: "server-v0.3.0", prerelease: false),
+            release(tag: "server-v0.4.2", prerelease: false),
+            release(tag: "server-v0.4.0", prerelease: false),
+            release(tag: "server-v0.5.0-beta1", prerelease: true),
         ]
         let picked = UpdateChecker.pickLatestStableRelease(from: releases)
         XCTAssertEqual(picked?.version, "0.4.2")
@@ -62,8 +62,8 @@ final class UpdateCheckerPreReleaseTests: XCTestCase {
         // "no update available" and stays put. Correct because beta
         // users should opt in explicitly, not auto-bump silently.
         let releases = [
-            release(tag: "service-v0.5.0-beta1", prerelease: true),
-            release(tag: "service-v0.5.0-beta2", prerelease: true),
+            release(tag: "server-v0.5.0-beta1", prerelease: true),
+            release(tag: "server-v0.5.0-beta2", prerelease: true),
         ]
         let picked = UpdateChecker.pickLatestStableRelease(from: releases)
         XCTAssertNil(picked)
@@ -78,7 +78,7 @@ final class UpdateCheckerPreReleaseTests: XCTestCase {
     func testIgnoresReleasesFromOtherStreams() {
         // The release-app and release-image workflows also publish
         // releases on this same GitHub repo. UpdateChecker must
-        // only pick service-v* — picking app-v* or image-v* would
+        // only pick server-v* — picking app-v* or image-v* would
         // download a DMG and try to extract it as a service binary,
         // which would visibly fail. Filter exists since M0 but
         // pinning here too because M3.18 reorganized the function.
@@ -86,11 +86,35 @@ final class UpdateCheckerPreReleaseTests: XCTestCase {
             release(tag: "app-v0.5.0-beta1", prerelease: true),
             release(tag: "app-v0.4.0", prerelease: false),
             release(tag: "image-v0.1.1", prerelease: false),
-            release(tag: "service-v0.4.0", prerelease: false),
+            release(tag: "server-v0.4.0", prerelease: false),
         ]
         let picked = UpdateChecker.pickLatestStableRelease(from: releases)
         XCTAssertEqual(picked?.version, "0.4.0",
-                       "only service-v* should match")
+                       "only server-v* should match")
+    }
+
+    // MARK: - Release channel (macOS 15 floor)
+
+    func testPicksServerChannelTag() {
+        let picked = UpdateChecker.pickLatestStableRelease(from: [
+            release(tag: "server-v0.8.0", prerelease: false),
+        ])
+        XCTAssertEqual(picked?.version, "0.8.0")
+    }
+
+    func testIgnoresLegacyServiceChannel() {
+        // service-v* is the frozen macOS 13+ channel. A newer number there
+        // must never win over the server-v* channel this app consumes.
+        let picked = UpdateChecker.pickLatestStableRelease(from: [
+            UpdateChecker.GitHubRelease(
+                tagName: "service-v0.9.0",
+                prerelease: false,
+                assets: [.init(name: "keywordista-service-0.9.0.zip",
+                               browserDownloadURL: "https://example.test/0.9.0.zip")]
+            ),
+            release(tag: "server-v0.8.0", prerelease: false),
+        ])
+        XCTAssertEqual(picked?.version, "0.8.0")
     }
 
     func testIgnoresReleasesWithoutZipAsset() {
@@ -98,11 +122,11 @@ final class UpdateCheckerPreReleaseTests: XCTestCase {
         // Skip them rather than trying to download from nothing.
         let releases = [
             UpdateChecker.GitHubRelease(
-                tagName: "service-v0.5.0",
+                tagName: "server-v0.5.0",
                 prerelease: false,
                 assets: []   // no .zip yet
             ),
-            release(tag: "service-v0.4.0", prerelease: false),
+            release(tag: "server-v0.4.0", prerelease: false),
         ]
         let picked = UpdateChecker.pickLatestStableRelease(from: releases)
         XCTAssertEqual(picked?.version, "0.4.0",
@@ -113,7 +137,7 @@ final class UpdateCheckerPreReleaseTests: XCTestCase {
         // The .sha256 file is also an asset on the release; UpdateChecker
         // wants the .zip, not the checksum.
         let release = UpdateChecker.GitHubRelease(
-            tagName: "service-v0.4.0",
+            tagName: "server-v0.4.0",
             prerelease: false,
             assets: [
                 .init(name: "service-0.4.0.sha256",

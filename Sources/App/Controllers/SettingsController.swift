@@ -13,6 +13,7 @@ struct SettingsController: RouteCollection {
         settings.get("asa", use: getASA)
         settings.put("asa", use: putASA)
         settings.delete("asa", use: deleteASA)
+        settings.get("asa", "accounts", use: listASAAccounts)
     }
 
     // ── ASC ───────────────────────────────────────────────────────────────
@@ -90,6 +91,8 @@ struct SettingsController: RouteCollection {
         let clientId: String
         let clientSecret: String?
         let orgId: String?
+        /// Omitted → keep the stored account; "" → clear it.
+        let adAccountId: String?
     }
 
     @Sendable func putASA(req: Request) async throws -> ASAStatus {
@@ -99,10 +102,11 @@ struct SettingsController: RouteCollection {
         let clientId = payload.clientId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clientId.isEmpty else { throw Abort(.badRequest, reason: "clientId is required") }
 
+        let existing = try await service.getASACredentials()
         let resolvedSecret: String
         if let pasted = payload.clientSecret?.trimmingCharacters(in: .whitespacesAndNewlines), !pasted.isEmpty {
             resolvedSecret = pasted
-        } else if let existing = try await service.getASACredentials() {
+        } else if let existing {
             resolvedSecret = existing.clientSecret
         } else {
             throw Abort(.badRequest, reason: "clientSecret is required for first-time setup")
@@ -111,13 +115,30 @@ struct SettingsController: RouteCollection {
         try await service.setASACredentials(ASACredentials(
             clientId: clientId,
             clientSecret: resolvedSecret,
-            orgId: payload.orgId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            orgId: payload.orgId?.trimmingCharacters(in: .whitespacesAndNewlines),
+            // A different client ID is a different API user, whose ad accounts
+            // the stored choice may not belong to: drop it unless one is sent.
+            adAccountId: payload.adAccountId.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                ?? (existing?.clientId == clientId ? existing?.adAccountId : nil)
         ))
         return try await service.getASAStatus()
     }
 
+    /// Ad accounts the stored credentials can reach, for the settings picker.
+    ///
+    /// Apple's failures come back as 502 via `AppleAdsError: AbortError`.
+    @Sendable func listASAAccounts(req: Request) async throws -> [ASAAdAccount] {
+        guard let credentials = try await req.settingsService().getASACredentials() else {
+            throw Abort(.conflict, reason: "Connect Apple Ads first")
+        }
+        return try await req.appleAdsClient(for: credentials).listAdAccounts()
+    }
+
     @Sendable func deleteASA(req: Request) async throws -> HTTPStatus {
         try await req.settingsService().clearASACredentials()
+        // Disconnect means stop using the key now: the live client would
+        // otherwise keep refreshing OAuth tokens with it until a restart.
+        await req.application.appleAdsSession.shutdown()
         return .noContent
     }
 }

@@ -90,8 +90,19 @@ struct VersionService: VersionServiceProtocol {
         }
     }
 
+    /// Server release channel. `service-v*` is the frozen macOS 13+ channel
+    /// (pre-Apple-Ads-v1 builds); this server needs macOS 15, so it only
+    /// reports `server-v*` releases as updates.
+    static let serverTagPrefix = "server-v"
+
+    /// Version string for a `server-v*` tag, or nil for any other stream.
+    static func serverReleaseVersion(fromTag tag: String) -> String? {
+        guard tag.hasPrefix(serverTagPrefix) else { return nil }
+        return String(tag.dropFirst(serverTagPrefix.count))
+    }
+
     private struct LatestServiceTag {
-        let tag: String           // e.g. "0.3.0" (the "service-v" prefix stripped)
+        let tag: String           // e.g. "0.3.0" (the "server-v" prefix stripped)
         let downloadUrl: String?
         let sha256: String?
     }
@@ -114,14 +125,14 @@ struct VersionService: VersionServiceProtocol {
         let decoder = JSONDecoder()
         let releases = try decoder.decode([GitHubRelease].self, from: Data(buffer: buffer))
 
-        // Filter for `service-v*` tags only; ignore `app-v*` (the menubar app
+        // Filter for `server-v*` tags only; ignore `app-v*` (the menubar app
         // ships on its own release stream) and any draft/test tags. Pick the
         // highest semver.
-        let serviceReleases = releases.filter { $0.tagName.hasPrefix("service-v") }
+        let serviceReleases = releases.filter { Self.serverReleaseVersion(fromTag: $0.tagName) != nil }
         let newest = serviceReleases.max(by: { compareTags($0.tagName, $1.tagName) == .orderedAscending })
         guard let newest else { return nil }
 
-        let tag = String(newest.tagName.dropFirst("service-v".count))
+        guard let tag = Self.serverReleaseVersion(fromTag: newest.tagName) else { return nil }
         // Prefer a universal tarball if there's one; fall back to whatever
         // asset is present so dev/test releases without arch-split builds
         // still resolve.
@@ -139,8 +150,8 @@ struct VersionService: VersionServiceProtocol {
     }
 
     private func compareTags(_ a: String, _ b: String) -> ComparisonResult {
-        let aClean = a.hasPrefix("service-v") ? String(a.dropFirst("service-v".count)) : a
-        let bClean = b.hasPrefix("service-v") ? String(b.dropFirst("service-v".count)) : b
+        let aClean = Self.serverReleaseVersion(fromTag: a) ?? a
+        let bClean = Self.serverReleaseVersion(fromTag: b) ?? b
         return compareSemver(aClean, bClean)
     }
 

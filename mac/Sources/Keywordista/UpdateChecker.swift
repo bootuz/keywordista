@@ -16,7 +16,7 @@ enum UpdateStatus: Equatable {
     case error(reason: String)
 }
 
-// Polls the project's GitHub Releases for newer `service-v*` tags, compares
+// Polls the project's GitHub Releases for newer `server-v*` tags, compares
 // against the locally-running server's reported version, and on user
 // request downloads + verifies + applies the new service binary.
 //
@@ -221,7 +221,8 @@ final class UpdateChecker: ObservableObject {
     /// unit tests can exercise without HTTP. Filters out:
     ///   • Pre-releases (the M3.18 fix — beta/rc/alpha tags must NOT
     ///     auto-prompt stable users)
-    ///   • Releases without the `service-v` prefix (app-v* / image-v*
+    ///   • Releases without the `server-v` prefix (app-v* / image-v* /
+    ///     the frozen legacy service-v*
     ///     belong to the other release streams; ignore them)
     ///   • Releases without a .zip asset (incomplete uploads etc.)
     /// Returns the highest-version remaining candidate, or nil if
@@ -238,8 +239,8 @@ final class UpdateChecker: ObservableObject {
             // would be prompted to "upgrade" to v0.5.0-beta1 the
             // moment we tagged it.
             guard !release.prerelease else { return nil }
-            guard release.tagName.hasPrefix("service-v") else { return nil }
-            let version = String(release.tagName.dropFirst("service-v".count))
+            guard release.tagName.hasPrefix(serverTagPrefix) else { return nil }
+            let version = String(release.tagName.dropFirst(serverTagPrefix.count))
             guard let asset = release.assets.first(where: { $0.name.hasSuffix(".zip") }),
                   let assetURL = URL(string: asset.browserDownloadURL) else {
                 return nil
@@ -328,7 +329,13 @@ final class UpdateChecker: ObservableObject {
         return stageDir
     }
 
-    /// Apple Developer team that signs `service-v*` release binaries
+    /// Server releases for macOS 15+ builds. Why not the old `service-v`:
+    /// menubar builds already in the field (macOS 13+) poll `service-v*` and
+    /// would install a macOS-15-only server that can't launch, after deleting
+    /// the working one. That channel is frozen; never tag it again.
+    nonisolated static let serverTagPrefix = "server-v"
+
+    /// Apple Developer team that signs `server-v*` release binaries
     /// (release-service.yml, "Developer ID Application" identity).
     /// Hardcoded like `repoOwner`: this updater only trusts releases
     /// from this project.

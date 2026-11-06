@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.2
 import PackageDescription
 
 // SPM package for the Keywordista menubar app. Separate from the root
@@ -11,7 +11,8 @@ import PackageDescription
 //      server binary + Public/ from the repo root
 let package = Package(
     name: "Keywordista",
-    platforms: [.macOS(.v13)],
+    // macOS 15: the bundled server requires it (see root Package.swift).
+    platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
             name: "Keywordista",
@@ -27,5 +28,6 @@ let package = Package(
             dependencies: ["Keywordista"],
             path: "Tests/KeywordistaTests"
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

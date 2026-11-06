@@ -5,7 +5,7 @@
 [![Release Service](https://github.com/bootuz/keywordista/actions/workflows/release-service.yml/badge.svg)](https://github.com/bootuz/keywordista/actions/workflows/release-service.yml)
 [![Release Image](https://github.com/bootuz/keywordista/actions/workflows/release-image.yml/badge.svg)](https://github.com/bootuz/keywordista/actions/workflows/release-image.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
-[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey.svg)](#install)
+[![macOS 15+](https://img.shields.io/badge/macOS-15%2B-lightgrey.svg)](#install)
 
 Tracks where your apps rank for a set of keywords across any of Apple's 175 App Store storefronts, snapshots the top results, and remembers everything — so you can see real ASO trends instead of guessing from this-week-only screenshots. A daily chart-position watchdog fires a browser notification the moment one of your apps enters, moves in, or exits a top-free category chart anywhere it's published. Runs entirely on your Mac: a Vapor service stores history in SQLite, a Svelte dashboard renders it, and a menu-bar app supervises the whole thing. You own the data and the schedule — no $50/mo subscription, no abandoned web app, no spreadsheet that goes stale within a week.
 
@@ -15,7 +15,7 @@ Tracks where your apps rank for a set of keywords across any of Apple's 175 App 
 
 ## Install
 
-> macOS 13+.
+> macOS 15+.
 
 <!-- LATEST_DMG_BEGIN -->
 **Download the latest DMG:** [Keywordista-0.6.2.dmg](https://github.com/bootuz/keywordista/releases/download/app-v0.6.2/Keywordista-0.6.2.dmg) (signed + notarized). Drag `Keywordista.app` into `/Applications` and launch — a magnifying-glass icon appears in your menu bar.
@@ -25,7 +25,7 @@ Click **Open Dashboard** → the browser opens `http://127.0.0.1:8080/` (auto-pi
 
 ### Build from source
 
-If you want to hack on it, you'll also need Swift 5.10+ and Node 20+ (CI builds on Node 24).
+If you want to hack on it, you'll also need Swift 6.2+ (Xcode 26) and Node 20+ (CI builds on Node 24).
 
 ```bash
 git clone https://github.com/bootuz/keywordista.git
@@ -123,7 +123,7 @@ cd web && npm run check    # svelte-check + tsc
 
 Three layers: the Vapor server in `Sources/App/`, the Svelte 5 + Tailwind SPA in `web/`, and the SwiftUI `MenuBarExtra` app in `mac/`. Build outputs land in `Public/` (SPA) and `mac/Keywordista.app/` (menu-bar bundle).
 
-Cutting a signed + notarized DMG: see [`.github/RELEASING.md`](.github/RELEASING.md). Tagged pushes (`app-v*`, `service-v*`) run the same release flow in CI.
+Cutting a signed + notarized DMG: see [`.github/RELEASING.md`](.github/RELEASING.md). Tagged pushes (`app-v*`, `server-v*`) run the same release flow in CI.
 
 ---
 
@@ -152,7 +152,8 @@ Everything under `/api/v1`. No auth, `127.0.0.1`-only. Five categories: **apps**
 | `GET` | `/chart-positions` | Currently-charted snapshot rows |
 | `GET` | `/chart-events?since=&limit=` | Append-only watchdog activity feed (SPA polls this) |
 | `POST` | `/charts/refresh` | Kick the chart watchdog immediately |
-| `GET` | `/settings/{asc,asa}` | Read App Store Connect / Apple Search Ads credential status |
+| `GET` | `/settings/{asc,asa}` | Read App Store Connect / Apple Ads credential status |
+| `GET` | `/settings/asa/accounts` | Ad accounts the stored Apple Ads credentials can reach |
 | `PUT`/`DELETE` | `/settings/{asc,asa}` | Update / clear those credentials |
 | `GET` | `/version` | `{ current, latest, updateAvailable, downloadUrl }` |
 
@@ -164,7 +165,8 @@ See [`requests.http`](requests.http) for ready-to-run examples.
 
 ## What's not here
 
-- **Apple Search Ads popularity scores.** v1 derives `difficulty` and `entryBarrier` from search results alone. ASA credentials slot in at `/api/v1/settings/asa` is wired, just no fetcher consuming it yet.
+- **Estimated popularity.** `difficulty` and `entryBarrier` come from search results alone. Real demand comes only from your own Apple Ads search-term reports (Platform API v1): the opportunity score and keyword suggestions exist for keywords your campaigns have seen, and nothing is guessed for the rest.
+- **Apple Ads campaign management.** Keywordista reads campaigns and search-term reports; it doesn't pause campaigns, change bids or budgets, or edit keywords yet.
 - **Chart-position history / sparklines.** The watchdog stores only the latest position per `(app, country, chart, genre)`; a `chart_position_history` table is the v2 follow-up.
 - **Auto-updates of the menu-bar app itself.** The server can update independently (it pulls service tarballs from GitHub Releases), but bumping the `.app` version still means downloading a new DMG.
 - **Linux / Windows.** Vapor runs everywhere; `Keywordista.app` is macOS-only. Linux users can clone + `./keywordista` from source.

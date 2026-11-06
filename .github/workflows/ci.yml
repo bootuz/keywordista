@@ -51,11 +51,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # macos-14 ships with Swift 5.10 in the system toolchain — no extra
-      # setup-action needed. Verify the version so a future runner change
-      # doesn't silently downgrade us.
-      - name: Show Swift version
-        run: swift --version
+      - name: Select Xcode with Swift 6.2+
+        # apple/apple-ads-platform-api-swift needs swift-tools 6.2. Pick the
+        # newest Xcode 26 on the runner instead of trusting the image
+        # default, and fail loudly if the image ever drops it.
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$XC" ]; then
+            echo "::error::No Xcode 26 (Swift 6.2+) on this runner"; ls -d /Applications/Xcode*.app; exit 1
+          fi
+          sudo xcode-select -s "$XC"
+          swift --version
 
       - name: Cache SwiftPM build artifacts
         uses: actions/cache@v4
@@ -118,8 +124,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show Swift version
-        run: swift --version
+      - name: Select Xcode with Swift 6.2+
+        # apple/apple-ads-platform-api-swift needs swift-tools 6.2. Pick the
+        # newest Xcode 26 on the runner instead of trusting the image
+        # default, and fail loudly if the image ever drops it.
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$XC" ]; then
+            echo "::error::No Xcode 26 (Swift 6.2+) on this runner"; ls -d /Applications/Xcode*.app; exit 1
+          fi
+          sudo xcode-select -s "$XC"
+          swift --version
 
       - name: Cache SwiftPM build artifacts
         uses: actions/cache@v4
@@ -179,7 +194,7 @@ jobs:
       # that turns out to be arm64-only reality (swift:6.1-jammy-slim
       # on arm64 is ~120 MB; on amd64 it's ~300+ MB). This CI job
       # measures the amd64 build, which is the worst-case platform.
-      # Current sizes (with dynamic Swift stdlib, swift:6.1-jammy-slim):
+      # Current sizes (with dynamic Swift stdlib, swift:6.1-jammy-slim; re-measure after the 6.2 bump):
       #   arm64 (local):  ~130 MB
       #   amd64 (CI):     ~360 MB (rough; refined as more builds land)
       # Real shrink path is M6 polish: distroless/cc + manual Swift

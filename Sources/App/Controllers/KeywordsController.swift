@@ -76,11 +76,7 @@ struct KeywordsController: RouteCollection {
 
     @Sendable func suggestions(req: Request) async throws -> SuggestionsResponse {
         guard let id = req.parameters.get("id", as: UUID.self) else { throw Abort(.badRequest) }
-        do {
-            return try await req.keywordSuggestionService().suggest(seedKeywordId: id)
-        } catch let failure as AppleSearchAdsClient.Failure {
-            // Surface Apple's reason text so the panel can render it.
-            throw Abort(.badGateway, reason: failure.description)
-        }
+        // An AppleAdsError escapes as a 502 carrying Apple's reason text.
+        return try await req.keywordSuggestionService().suggest(seedKeywordId: id)
     }
 }

@@ -70,7 +70,7 @@ Standard SemVer for the image as a whole:
   endpoints, performance improvements.
 - **PATCH** — bug fixes, dep bumps, docs.
 
-The Mac DMG (`app-v*`), the menubar service .zip (`service-v*`), and
+The Mac DMG (`app-v*`), the menubar service .zip (`server-v*`; `service-v*` before macOS 15), and
 this image (`image-v*`) are **three independent SemVer streams**. They
 don't lock-step. Each has its own changelog and release cadence.
 

@@ -10,6 +10,7 @@
     ensurePolling,
     refreshDeveloperKeywords,
     refreshOpportunity,
+    opportunityError,
   } from '../lib/stores';
   import {
     groupedSections,
@@ -273,6 +274,11 @@
         <p class="mt-1 text-sm text-zinc-500">Clear filters to see all {scopedTotal} rows.</p>
       </div>
     {:else}
+      {#if $opportunityError}
+        <p class="mb-3 text-sm text-amber-700 dark:text-amber-400">
+          Opportunity scores unavailable. {$opportunityError}
+        </p>
+      {/if}
       <div class="overflow-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
         <table class="w-full text-sm">
           <thead class="bg-zinc-50 dark:bg-zinc-900">

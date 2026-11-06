@@ -98,6 +98,30 @@ private actor StubASASettings: SettingsServiceProtocol {
     func clearASACredentials() async throws {}
 }
 
+extension KeywordPopularityServiceTests {
+    @Test("when every campaign's report fails, the error surfaces instead of an empty result")
+    func allReportsFailingThrows() async throws {
+        let service = KeywordPopularityService(
+            settings: StubASASettings(asa: .stub),
+            keywordRepo: InMemoryKeywordRepository([Keyword(id: UUID(), term: "flashcards", countryCode: "us")]),
+            makeClient: { _ in ReportsFailingASAClientP() },
+            now: { Date(timeIntervalSince1970: 1_750_000_000) },
+            logger: Logger(label: "test"),
+        )
+        await #expect(throws: AppleAdsError.unreadableResponse("x")) { _ = try await service.popularity() }
+    }
+}
+
+private struct ReportsFailingASAClientP: AppleSearchAdsClientProtocol {
+    func listCampaigns() async throws -> [ASACampaign] {
+        [ASACampaign(id: 1, name: "US", countriesOrRegions: ["US"], displayStatus: "RUNNING"),
+         ASACampaign(id: 2, name: "US2", countriesOrRegions: ["US"], displayStatus: "RUNNING")]
+    }
+    func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
+        throw AppleAdsError.unreadableResponse("x")
+    }
+}
+
 private actor StubASAClientP: AppleSearchAdsClientProtocol {
     let campaigns: [ASACampaign]
     let searchTermsByCampaign: [Int64: [ASASearchTerm]]

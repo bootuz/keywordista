@@ -171,7 +171,7 @@ cp -R "$REPO_ROOT/Public" "$APP_BUNDLE/Contents/Resources/Public"
 # Read from the same Version.swift literal the server reports at
 # /api/v1/version, so the marker can never disagree with the binary — if it
 # did, the updater would keep re-offering a release the supervisor won't run.
-# release-app.yml stamps that literal from the latest service-v* tag; local
+# release-app.yml stamps that literal from the latest server-v* tag; local
 # `make dmg` builds leave it at 0.0.0, which loses to any downloaded release.
 SERVICE_VERSION="$(sed -n 's/^[[:space:]]*static let current = "\([^"]*\)".*/\1/p' "$REPO_ROOT/Sources/App/Services/Version.swift")"
 [[ -n "$SERVICE_VERSION" ]] || { warn "couldn't read service version from Sources/App/Services/Version.swift"; exit 1; }
