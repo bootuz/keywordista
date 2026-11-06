@@ -157,16 +157,22 @@ struct AppleAdsInsightsService: AppleAdsInsightsServiceProtocol {
             }
         }
 
-        let summaries = campaigns
-            .map { c in
-                (spend: current[c.id]?.spend ?? 0, dto: AppleAdsCampaignSummaryDTO(
-                    id: String(c.id), name: c.name, status: c.status,
-                    metrics: AppleAdsMath.dto(current[c.id] ?? .zero),
-                    previous: AppleAdsMath.dto(previous[c.id] ?? .zero)
-                ))
-            }
-            .sorted { $0.spend != $1.spend ? $0.spend > $1.spend : $0.dto.name < $1.dto.name }
-            .map(\.dto)
+        // Spelled out with explicit types: as one chained map/sort over
+        // tuples, Swift 6.2's type checker gives up on it ("unable to
+        // type-check this expression in reasonable time").
+        var summaries: [AppleAdsCampaignSummaryDTO] = []
+        for c in campaigns {
+            let metrics: AppleAdsMetrics = current[c.id] ?? .zero
+            let before: AppleAdsMetrics = previous[c.id] ?? .zero
+            summaries.append(AppleAdsCampaignSummaryDTO(
+                id: String(c.id), name: c.name, status: c.status,
+                metrics: AppleAdsMath.dto(metrics), previous: AppleAdsMath.dto(before)
+            ))
+        }
+        summaries.sort { (a: AppleAdsCampaignSummaryDTO, b: AppleAdsCampaignSummaryDTO) -> Bool in
+            if a.metrics.spend != b.metrics.spend { return a.metrics.spend > b.metrics.spend }
+            return a.name < b.name
+        }
 
         return AppleAdsOverviewDTO(
             currency: campaigns.lazy.compactMap(\.currency).first ?? rows.lazy.compactMap(\.currency).first,
