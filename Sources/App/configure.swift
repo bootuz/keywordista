@@ -80,6 +80,7 @@ public func configure(_ app: Application) async throws {
     // contiguously so the diff is easy to read.
     app.migrations.add(AddKindToWatchedApp())
     app.migrations.add(CreateAppMetadataSnapshot())
+    app.migrations.add(CreateAppleAdsMirror())
 
     try await app.autoMigrate()
 
