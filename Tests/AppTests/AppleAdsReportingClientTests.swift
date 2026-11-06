@@ -76,6 +76,21 @@ struct AppleAdsReportingClientTests {
         await session.shutdown()
     }
 
+    // Apple answers 400 "Filters contain unsupported fields campaignId" on
+    // the campaign report, so it's fetched unfiltered and narrowed here.
+    @Test("campaignDays sends no campaignId filter and keeps only the asked-for campaigns")
+    func campaignDaysFiltersLocally() async throws {
+        let day = #"{"date":"2026-10-01",\#(Self.metrics)}"#
+        let transport = StubAppleAdsTransport([
+            .init(status: .ok, json: #"{"result":{"rows":[{"metadata":{"id":1},"granularMetrics":[\#(day)]},{"metadata":{"id":2},"granularMetrics":[\#(day)]}]},"pagination":{"offset":0,"pageSize":2,"totalCount":2}}"#),
+        ])
+        let (client, session) = Self.makeClient(transport)
+        let days = try await client.campaignDays(campaignIds: [1], from: "2026-10-01", to: "2026-10-01")
+        #expect(days.map(\.campaignId) == [1])
+        #expect(Self.filters(try Self.body(await transport.requests.first))["campaignId"] == nil)
+        await session.shutdown()
+    }
+
     @Test("keywordDays carries country and Apple's suggested bid, grouped by country")
     func keywordDaysCarriesCountryAndSuggestedBid() async throws {
         let transport = StubAppleAdsTransport([

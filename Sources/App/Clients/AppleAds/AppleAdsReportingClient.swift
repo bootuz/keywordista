@@ -121,12 +121,15 @@ extension AppleAdsPlatformClient: AppleAdsReportingClientProtocol {
     func campaignDays(campaignIds: [Int64], from: String, to: String) async throws -> [AppleAdsCampaignDay] {
         guard !campaignIds.isEmpty else { return [] }
         let context = XApContext(adAccountID: try await resolveAdAccountId()).rawValue
-        let ids = try OpenAPIValueContainer(unvalidatedValue: campaignIds.map { Int($0) })
+        // Why no filter: the campaign report answers 400 "Filters contain
+        // unsupported fields campaignId", so it returns every app campaign
+        // and the wanted ones are picked out below.
+        let wanted = Set(campaignIds)
         var days: [AppleAdsCampaignDay] = []
         var offset = 0
         while true {
             let request = Self.reportRequest(
-                filters: [.init(field: "campaignId", _operator: ._in, value: ids)],
+                filters: [],
                 from: from, to: to, groupByCountry: false, offset: offset
             )
             let page = try await call { api in
@@ -143,7 +146,7 @@ extension AppleAdsPlatformClient: AppleAdsReportingClientProtocol {
             }
             let rows = page.result?.rows ?? []
             for row in rows {
-                guard let id = row.metadata?.id else { continue }
+                guard let id = row.metadata?.id, wanted.contains(id) else { continue }
                 for g in row.granularMetrics ?? [] {
                     guard let date = g.value1.date else { continue }
                     days.append(AppleAdsCampaignDay(
