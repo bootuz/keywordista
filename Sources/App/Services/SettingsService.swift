@@ -12,7 +12,19 @@ struct ASCCredentials: Sendable, Equatable {
 struct ASACredentials: Sendable, Equatable {
     let clientId: String
     let clientSecret: String
+    /// v5-era org ID. Kept because it identifies which v1 ad account an
+    /// upgraded install meant when Apple returns more than one.
     let orgId: String?
+    /// Platform API v1 ad account (`X-AP-Context: adAccountId=…`). Nil until
+    /// the user picks one; reads then fall back to ACL-based resolution.
+    let adAccountId: String?
+
+    init(clientId: String, clientSecret: String, orgId: String?, adAccountId: String? = nil) {
+        self.clientId = clientId
+        self.clientSecret = clientSecret
+        self.orgId = orgId
+        self.adAccountId = adAccountId
+    }
 }
 
 // Storage-level status descriptors. These are what the API returns to the
@@ -40,12 +52,14 @@ struct ASCStatus: Codable, Sendable, Equatable {
 struct ASAStatus: Codable, Sendable, Equatable {
     let clientId: String?
     let orgId: String?
+    let adAccountId: String?
     let hasClientSecret: Bool
     let configured: Bool
 
-    init(clientId: String?, orgId: String?, hasClientSecret: Bool) {
+    init(clientId: String?, orgId: String?, adAccountId: String? = nil, hasClientSecret: Bool) {
         self.clientId = clientId
         self.orgId = orgId
+        self.adAccountId = adAccountId
         self.hasClientSecret = hasClientSecret
         self.configured = clientId != nil && hasClientSecret
     }
@@ -82,9 +96,10 @@ struct SettingsService: SettingsServiceProtocol {
         static let asaClientId = "asa.clientId"
         static let asaClientSecret = "asa.clientSecret"
         static let asaOrgId = "asa.orgId"
+        static let asaAdAccountId = "asa.adAccountId"
 
         static let asc = [ascKeyId, ascIssuerId, ascPrivateKey]
-        static let asa = [asaClientId, asaClientSecret, asaOrgId]
+        static let asa = [asaClientId, asaClientSecret, asaOrgId, asaAdAccountId]
 
         /// The subset of storage keys whose values are credential-
         /// shaped and must be encrypted at rest. The M1.9 migration
@@ -140,6 +155,7 @@ struct SettingsService: SettingsServiceProtocol {
         return ASAStatus(
             clientId: values[Keys.asaClientId],
             orgId: values[Keys.asaOrgId],
+            adAccountId: values[Keys.asaAdAccountId],
             hasClientSecret: values[Keys.asaClientSecret]?.isEmpty == false
         )
     }
@@ -156,7 +172,8 @@ struct SettingsService: SettingsServiceProtocol {
         return ASACredentials(
             clientId: clientId,
             clientSecret: clientSecret,
-            orgId: values[Keys.asaOrgId]
+            orgId: values[Keys.asaOrgId],
+            adAccountId: values[Keys.asaAdAccountId]
         )
     }
 
@@ -168,6 +185,11 @@ struct SettingsService: SettingsServiceProtocol {
             try await repository.set(Keys.asaOrgId, value: orgId)
         } else {
             try await repository.delete(Keys.asaOrgId)
+        }
+        if let adAccountId = creds.adAccountId, !adAccountId.isEmpty {
+            try await repository.set(Keys.asaAdAccountId, value: adAccountId)
+        } else {
+            try await repository.delete(Keys.asaAdAccountId)
         }
     }
 

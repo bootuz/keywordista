@@ -90,6 +90,8 @@ struct SettingsController: RouteCollection {
         let clientId: String
         let clientSecret: String?
         let orgId: String?
+        /// Omitted → keep the stored account; "" → clear it.
+        let adAccountId: String?
     }
 
     @Sendable func putASA(req: Request) async throws -> ASAStatus {
@@ -99,10 +101,11 @@ struct SettingsController: RouteCollection {
         let clientId = payload.clientId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clientId.isEmpty else { throw Abort(.badRequest, reason: "clientId is required") }
 
+        let existing = try await service.getASACredentials()
         let resolvedSecret: String
         if let pasted = payload.clientSecret?.trimmingCharacters(in: .whitespacesAndNewlines), !pasted.isEmpty {
             resolvedSecret = pasted
-        } else if let existing = try await service.getASACredentials() {
+        } else if let existing {
             resolvedSecret = existing.clientSecret
         } else {
             throw Abort(.badRequest, reason: "clientSecret is required for first-time setup")
@@ -111,7 +114,9 @@ struct SettingsController: RouteCollection {
         try await service.setASACredentials(ASACredentials(
             clientId: clientId,
             clientSecret: resolvedSecret,
-            orgId: payload.orgId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            orgId: payload.orgId?.trimmingCharacters(in: .whitespacesAndNewlines),
+            adAccountId: payload.adAccountId.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                ?? existing?.adAccountId
         ))
         return try await service.getASAStatus()
     }
