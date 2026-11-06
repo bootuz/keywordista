@@ -86,7 +86,8 @@ enum Backup {
     /// - Returns: the snapshot bytes.
     static func takeSQLiteSnapshot(
         of livePath: String,
-        on db: any Database
+        on db: any Database,
+        in directory: URL = FileManager.default.temporaryDirectory
     ) async throws -> Data {
         guard let sql = db as? any SQLDatabase else {
             // Defensive — caller shouldn't be giving us a non-SQL
@@ -97,7 +98,7 @@ enum Backup {
         // Temp path: UUID-suffixed under the system temp dir so
         // concurrent backups (which shouldn't happen given the
         // admin-only gate, but defense-in-depth) don't collide.
-        let tempPath = FileManager.default.temporaryDirectory
+        let tempPath = directory
             .appendingPathComponent("keywordista-snapshot-\(UUID().uuidString).sqlite")
             .path
 
