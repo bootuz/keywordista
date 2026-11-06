@@ -4,7 +4,8 @@ name: Release Service
 # publishes it to GitHub Releases when a service-v* tag is pushed. The
 # menubar app's UpdateChecker (5d) polls the GitHub Releases API for
 # `service-v*` tags, downloads the .zip, verifies the contained binary's
-# signature with `codesign --verify`, and atomically swaps it into
+# signature with `codesign --verify` pinned to our Developer ID team
+# (UpdateChecker.releaseCodeRequirement), and atomically swaps it into
 # ~/Library/Application Support/Keywordista/service/.
 #
 # Notarization binds to the binary's signature — not to the .zip wrapper —
