@@ -34,6 +34,11 @@ actor AppleAdsSession {
     /// was released rather than leaked.
     private(set) var completedShutdowns = 0
 
+    /// Ad accounts resolved from the ACL list, keyed by credentials + legacy
+    /// org ID. In memory only: the user's explicit choice is what persists
+    /// (in settings), this just saves an ACL round-trip per request.
+    private var resolvedAccounts: [String: Int64] = [:]
+
     init(logger: Logger, makeClient: @escaping Factory) {
         self.logger = logger
         self.makeClient = makeClient
@@ -41,7 +46,10 @@ actor AppleAdsSession {
 
     /// Production wiring: the stored client-secret JWT, plus `middleware`
     /// (the 429 retry policy) on every request.
-    static func live(logger: Logger, middleware: [any ClientMiddleware] = []) -> AppleAdsSession {
+    static func live(
+        logger: Logger,
+        middleware: [any ClientMiddleware] = [AppleAdsRetryMiddleware()]
+    ) -> AppleAdsSession {
         AppleAdsSession(logger: logger) { creds in
             try await AppleAdsClient(configuration: .init(
                 clientId: creds.clientId,
@@ -79,6 +87,14 @@ actor AppleAdsSession {
         return made.client
     }
 
+    func resolvedAdAccount(for credentials: ASACredentials) -> Int64? {
+        resolvedAccounts[Self.accountKey(credentials)]
+    }
+
+    func rememberAdAccount(_ id: Int64, for credentials: ASACredentials) {
+        resolvedAccounts[Self.accountKey(credentials)] = id
+    }
+
     /// Stops the live client. Safe to call more than once.
     func shutdown() async {
         guard let current = live else { return }
@@ -101,6 +117,10 @@ actor AppleAdsSession {
         await entry.group.triggerGracefulShutdown()
         await entry.runTask.value
         completedShutdowns += 1
+    }
+
+    private static func accountKey(_ credentials: ASACredentials) -> String {
+        "\(fingerprint(credentials))\u{0}\(credentials.orgId ?? "")"
     }
 
     /// Hash rather than the raw secret, so the JWT isn't kept around as a key.

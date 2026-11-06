@@ -270,9 +270,9 @@ private actor StubASAClient: AppleSearchAdsClientProtocol {
 
 private struct FailingASAClient: AppleSearchAdsClientProtocol {
     func listCampaigns() async throws -> [ASACampaign] {
-        throw AppleSearchAdsClient.Failure.invalidCredentials
+        throw AppleAdsError.unauthorized
     }
     func searchTermsReport(campaignId: Int64, startDate: Date, endDate: Date) async throws -> [ASASearchTerm] {
-        throw AppleSearchAdsClient.Failure.invalidCredentials
+        throw AppleAdsError.unauthorized
     }
 }

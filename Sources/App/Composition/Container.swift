@@ -64,20 +64,14 @@ extension Request {
     }
 
     func keywordSuggestionService() -> any KeywordSuggestionServiceProtocol {
-        let theHTTP: any ASAHTTPClient = VaporASAHTTPClient(client: client)
         let theLogger = logger
-        let cache = application.asaTokenCache
+        let session = application.appleAdsSession
         return KeywordSuggestionService(
             settings: settingsService(),
             keywordRepo: FluentKeywordRepository(db: db),
             rankCheckRepo: FluentRankCheckRepository(db: db),
             makeClient: { creds in
-                AppleSearchAdsClient(
-                    credentials: creds,
-                    tokenCache: cache,
-                    http: theHTTP,
-                    logger: theLogger
-                )
+                AppleAdsPlatformClient(credentials: creds, session: session, logger: theLogger)
             },
             now: { Date() },
             logger: logger
@@ -85,19 +79,13 @@ extension Request {
     }
 
     func keywordPopularityService() -> any KeywordPopularityServiceProtocol {
-        let theHTTP: any ASAHTTPClient = VaporASAHTTPClient(client: client)
         let theLogger = logger
-        let cache = application.asaTokenCache
+        let session = application.appleAdsSession
         return KeywordPopularityService(
             settings: settingsService(),
             keywordRepo: FluentKeywordRepository(db: db),
             makeClient: { creds in
-                AppleSearchAdsClient(
-                    credentials: creds,
-                    tokenCache: cache,
-                    http: theHTTP,
-                    logger: theLogger
-                )
+                AppleAdsPlatformClient(credentials: creds, session: session, logger: theLogger)
             },
             now: { Date() },
             logger: logger
@@ -163,21 +151,6 @@ extension Request {
 }
 
 extension Application {
-    /// Process-wide cache for ASA OAuth access tokens. Lazily created on
-    /// first use and held in `Application.storage` so all request-scoped
-    /// ASA clients share the same cache and don't burn one OAuth exchange
-    /// per request.
-    var asaTokenCache: ASATokenCache {
-        if let existing = storage[ASATokenCacheKey.self] { return existing }
-        let new = ASATokenCache()
-        storage[ASATokenCacheKey.self] = new
-        return new
-    }
-
-    private struct ASATokenCacheKey: StorageKey {
-        typealias Value = ASATokenCache
-    }
-
     /// The process's Apple Ads client owner. Set once in `configure` (not
     /// lazily) so two concurrent first requests can't each create a session
     /// and each pay an OAuth exchange.

@@ -78,7 +78,7 @@ struct KeywordsController: RouteCollection {
         guard let id = req.parameters.get("id", as: UUID.self) else { throw Abort(.badRequest) }
         do {
             return try await req.keywordSuggestionService().suggest(seedKeywordId: id)
-        } catch let failure as AppleSearchAdsClient.Failure {
+        } catch let failure as AppleAdsError {
             // Surface Apple's reason text so the panel can render it.
             throw Abort(.badGateway, reason: failure.description)
         }
