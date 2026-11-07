@@ -40,7 +40,12 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    # Why macOS 26 and not 15: generate-icon.sh compiles the Icon Composer
+    # document (AppIcon.icon) with actool, which renders it through macOS 26
+    # system frameworks. On a macOS 15 host actool's AssetRuntime crashes
+    # (IBPlatformToolFailureException). The app still targets macOS 15 via
+    # Package.swift and LSMinimumSystemVersion; only the build host moved.
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
